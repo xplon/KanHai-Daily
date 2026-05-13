@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>看海日报</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="assets/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="./" aria-label="看海日报首页">
+          <span class="brand-mark">KH</span>
+          <span>
+            <strong>看海日报</strong>
+            <small>Unciv Chronicle</small>
+          </span>
+        </a>
+        <div class="selectors" aria-label="报纸筛选">
+          <label>
+            <span>对局</span>
+            <select id="gameSelect"></select>
+          </label>
+          <label>
+            <span>期号</span>
+            <select id="issueSelect"></select>
+          </label>
+        </div>
+        <div class="share-actions" aria-label="分享报纸">
+          <button id="copyImageButton" type="button">复制报纸图</button>
+          <button id="downloadImageButton" type="button">下载报纸图</button>
+        </div>
+      </header>
+
+      <main class="newsroom">
+        <aside class="rail archive-rail" aria-labelledby="archiveTitle">
+          <div class="rail-heading">
+            <span class="rule"></span>
+            <h2 id="archiveTitle">往期</h2>
+          </div>
+          <div id="archiveList" class="archive-list"></div>
+        </aside>
+
+        <section class="paper-stage" aria-live="polite">
+          <article id="newspaper" class="newspaper-paper">
+            <div class="loading">正在排版...</div>
+          </article>
+          <p id="shareStatus" class="share-status" role="status" aria-live="polite"></p>
+        </section>
+      </main>
+    </div>
+
+    <script src="assets/vendor/html2canvas.min.js"></script>
+    <script type="module" src="assets/app.js"></script>
+  </body>
+</html>

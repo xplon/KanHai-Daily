@@ -148,8 +148,8 @@ function parseArgs(argv) {
     timelineOut: path.join(PROJECT_DIR, "reports", "timeline.md"),
     timelineJsonOut: path.join(PROJECT_DIR, "reports", "timeline.json"),
     style: "auto",
-    maxTokens: Number(process.env.KANGHAI_MAX_TOKENS || 1800),
-    temperature: Number(process.env.KANGHAI_TEMPERATURE || 0.9),
+    maxTokens: Number(process.env.KANHAI_MAX_TOKENS || 1800),
+    temperature: Number(process.env.KANHAI_TEMPERATURE || 0.9),
     noLlm: false,
     noFactCheck: false,
     noTimeline: false,
@@ -202,7 +202,7 @@ function parseArgs(argv) {
 
 function printHelp() {
   console.log(`Usage:
-  node kanghai-daily/scripts/kanghai-paper.mjs [options]
+  node kanhai-daily/scripts/kanhai-paper.mjs [options]
 
 Options:
   --source remote|local      Data source, defaults to remote
@@ -1350,7 +1350,7 @@ function gameVersionText(game) {
 
 function buildSourcePack(game, brief, args) {
   return {
-    schema: "kanghai-daily-source-pack/v1",
+    schema: "kanhai-daily-source-pack/v1",
     visibility: "llm_visible",
     generatedAt: new Date().toISOString(),
     note: "brief 字段就是 ai-prompt.md 中交给 LLM 的完整脱敏 JSON 素材。metadata 仅用于本地核稿，不要求 LLM 使用。",
@@ -1714,7 +1714,7 @@ ${JSON.stringify(brief, null, 2)}
 async function callAnthropic(prompt, args, options = {}) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    throw new Error("Missing ANTHROPIC_API_KEY. Put it in kanghai-daily/.env or the process environment.");
+    throw new Error("Missing ANTHROPIC_API_KEY. Put it in kanhai-daily/.env or the process environment.");
   }
   const baseUrl = (process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com").replace(/\/+$/, "");
   const model = process.env.ANTHROPIC_MODEL || "claude-opus-4-6";
@@ -1913,8 +1913,8 @@ function renderTimelineMarkdown(entries) {
 
 async function updateTimeline(game, brief, args) {
   if (args.noTimeline) return null;
-  const existing = await readJsonIfPresent(args.timelineJsonOut, { schema: "kanghai-daily-major-timeline/v2", entries: [] });
-  const entries = existing.schema === "kanghai-daily-major-timeline/v2" ? existing.entries || [] : [];
+  const existing = await readJsonIfPresent(args.timelineJsonOut, { schema: "kanhai-daily-major-timeline/v2", entries: [] });
+  const entries = existing.schema === "kanhai-daily-major-timeline/v2" ? existing.entries || [] : [];
   const timelineKey = (entry) => (entry.category === "全球广播" ? `world|${entry.summary}` : entry.key);
   const keepTimelineEntry = (entry) => ["全球广播", "城市易手"].includes(entry.category);
   const byKey = new Map();
@@ -1932,7 +1932,7 @@ async function updateTimeline(game, brief, args) {
     if (!current || (entry.turn ?? Infinity) < (current.turn ?? Infinity)) byKey.set(key, { ...entry, key });
   }
   const next = {
-    schema: "kanghai-daily-major-timeline/v2",
+    schema: "kanhai-daily-major-timeline/v2",
     updatedAt: new Date().toISOString(),
     entries: [...byKey.values()].sort((a, b) => (a.turn ?? 0) - (b.turn ?? 0) || a.summary.localeCompare(b.summary, "zh-Hans-CN")),
   };

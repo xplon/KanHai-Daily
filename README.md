@@ -17,7 +17,7 @@
 
 ## 配置
 
-`.env` 放在 `kanghai-daily/.env`，这个文件已加入 `.gitignore`。示例见 `kanghai-daily/.env.example`。
+`.env` 放在 `kanhai-daily/.env`，这个文件已加入 `.gitignore`。示例见 `kanhai-daily/.env.example`。
 
 必需：
 
@@ -30,14 +30,14 @@ ANTHROPIC_MODEL=
 可选：
 
 ```env
-KANGHAI_TEMPERATURE=0.75
-KANGHAI_MAX_TOKENS=1800
+KANHAI_TEMPERATURE=0.75
+KANHAI_MAX_TOKENS=1800
 ```
 
 ## 生成报纸
 
 ```powershell
-node .\kanghai-daily\scripts\kanghai-paper.mjs `
+node .\kanhai-daily\scripts\kanhai-paper.mjs `
   --game-id 2ec21879-b28b-4ea4-89f8-aafb87d6e532 `
   --server https://uncivserver.xyz
 ```
@@ -45,7 +45,7 @@ node .\kanghai-daily\scripts\kanghai-paper.mjs `
 默认输出到类似这样的当期目录，避免覆盖旧报纸：
 
 ```text
-kanghai-daily/reports/runs/T081_公元230年_20260513-195733/
+kanhai-daily/reports/runs/T081_公元230年_20260513-195733/
 ```
 
 当期目录内会包含：
@@ -62,16 +62,60 @@ kanghai-daily/reports/runs/T081_公元230年_20260513-195733/
 只生成脱敏素材和提示词，不调用 LLM：
 
 ```powershell
-node .\kanghai-daily\scripts\kanghai-paper.mjs --no-llm
+node .\kanhai-daily\scripts\kanhai-paper.mjs --no-llm
 ```
 
 指定写作倾向：
 
 ```powershell
-node .\kanghai-daily\scripts\kanghai-paper.mjs --style 悼文
-node .\kanghai-daily\scripts\kanghai-paper.mjs --style 文言
-node .\kanghai-daily\scripts\kanghai-paper.mjs --style 独家消息
+node .\kanhai-daily\scripts\kanhai-paper.mjs --style 悼文
+node .\kanhai-daily\scripts\kanhai-paper.mjs --style 文言
+node .\kanhai-daily\scripts\kanhai-paper.mjs --style 独家消息
 ```
+
+## 生成 GitHub Pages 网页
+
+`docs/` 是公开网页目录，适合在 GitHub Pages 里选择 `frontend` 分支的 `/docs` 发布。网页不会直接读取 `reports/`，而是先把可公开的 `paper.md` 和少量脱敏摘要构建成 `docs/data/*.json`。
+
+推荐用独立 worktree 维护前端分支，避免影响正在 `main` 分支上跑的日报生成逻辑：
+
+```powershell
+git worktree add ..\kanhai-daily-frontend frontend
+```
+
+```powershell
+node .\scripts\build-pages.mjs
+```
+
+生成链路建议是：先在 `main` worktree 生成日报，再在 `frontend` worktree 构建页面。
+
+```powershell
+# 在 kanhai-daily 目录
+node .\scripts\kanhai-paper.mjs
+
+# 在 kanhai-daily-frontend 目录
+node .\scripts\build-pages.mjs --reports-dir ..\kanhai-daily\reports
+git add docs scripts README.md
+git commit -m "Update 看海日报 pages"
+git push origin frontend
+```
+
+如果只想发布你人工选中的几期，先记下 `reports/runs/` 里的当期目录名，然后重复传入 `--include-run`：
+
+```powershell
+node .\scripts\build-pages.mjs `
+  --reports-dir ..\kanhai-daily\reports `
+  --include-run T082_公元260年_20260513-221516 `
+  --include-run T082_公元260年_20260513-211907
+```
+
+如果未来同时跑多个对局，默认会从每个 `source-pack.json` 的真实游戏 ID 中截取前 8 位作为公开对局标识，例如 `2ec21879`。也可以手动覆盖公开 slug 和名称：
+
+```powershell
+node .\scripts\build-pages.mjs --game-slug main-table --game-name 看海主局
+```
+
+注意：`build-pages.mjs` 默认不会把真实游戏 UUID、服务器地址、`source-pack.json`、`evidence.md` 或 API 信息写入 `docs/`。
 
 ## 栏目设计
 
@@ -110,7 +154,7 @@ node .\kanghai-daily\scripts\kanghai-paper.mjs --style 独家消息
 
 ## 信源核对稿
 
-每次运行 `kanghai-paper.mjs` 都会在当期目录内额外生成 `evidence.md`。这份文件用于人工核稿，不建议发群。
+每次运行 `kanhai-paper.mjs` 都会在当期目录内额外生成 `evidence.md`。这份文件用于人工核稿，不建议发群。
 
 它会展示：
 
@@ -129,7 +173,7 @@ node .\kanghai-daily\scripts\kanghai-paper.mjs --style 独家消息
 也可以指定输出位置：
 
 ```powershell
-node .\kanghai-daily\scripts\kanghai-paper.mjs --evidence-out .\kanghai-daily\reports\evidence.md
+node .\kanhai-daily\scripts\kanhai-paper.mjs --evidence-out .\kanhai-daily\reports\evidence.md
 ```
 
 ## 累计时间线
@@ -139,17 +183,17 @@ node .\kanghai-daily\scripts\kanghai-paper.mjs --evidence-out .\kanghai-daily\re
 `reports/timeline.md` 是从长期库生成的阅读版，适合之后回顾战争、奇观和时代变化。普通边境提示、城市涨人口、零散蛮族消息不会进入这里。
 
 ```powershell
-node .\kanghai-daily\scripts\kanghai-paper.mjs --no-llm --no-timeline
+node .\kanhai-daily\scripts\kanhai-paper.mjs --no-llm --no-timeline
 ```
 
 可以用 `--no-timeline` 临时跳过时间线更新。
 
 ## 后台分析线
 
-`scripts/kanghai-daily.mjs` 是旧的后台分析脚本，会输出更像数据简报的 `reports/latest.md`。它适合调试，不建议直接发群。
+`scripts/kanhai-daily.mjs` 是旧的后台分析脚本，会输出更像数据简报的 `reports/latest.md`。它适合调试，不建议直接发群。
 
 ```powershell
-node .\kanghai-daily\scripts\kanghai-daily.mjs --out .\kanghai-daily\reports\latest.md
+node .\kanhai-daily\scripts\kanhai-daily.mjs --out .\kanhai-daily\reports\latest.md
 ```
 
 ## 关键代码来源

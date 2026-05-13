@@ -85,7 +85,7 @@ function parseArgs(argv) {
 
 function printHelp() {
   console.log(`Usage:
-  node kanghai-daily/scripts/kanghai-daily.mjs [options]
+  node kanhai-daily/scripts/kanhai-daily.mjs [options]
 
 Options:
   --source remote|local      Data source, defaults to remote
