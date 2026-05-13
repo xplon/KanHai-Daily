@@ -15,9 +15,11 @@
 
 默认不会上传或修改联机存档。
 
+成稿提示词会固定要求报头保留“公元纪年·四字副题”，并在结尾生成“本报编辑部按”按语，用来诙谐收束当前局势。
+
 ## 配置
 
-`.env` 放在 `kanghai-daily/.env`，这个文件已加入 `.gitignore`。示例见 `kanghai-daily/.env.example`。
+`.env` 放在 `kanhai-daily/.env`，这个文件已加入 `.gitignore`。示例见 `kanhai-daily/.env.example`。
 
 必需：
 
@@ -30,14 +32,14 @@ ANTHROPIC_MODEL=
 可选：
 
 ```env
-KANGHAI_TEMPERATURE=0.75
-KANGHAI_MAX_TOKENS=1800
+KANHAI_TEMPERATURE=0.75
+KANHAI_MAX_TOKENS=1800
 ```
 
 ## 生成报纸
 
 ```powershell
-node .\kanghai-daily\scripts\kanghai-paper.mjs `
+node .\kanhai-daily\scripts\kanhai-paper.mjs `
   --game-id 2ec21879-b28b-4ea4-89f8-aafb87d6e532 `
   --server https://uncivserver.xyz
 ```
@@ -45,7 +47,7 @@ node .\kanghai-daily\scripts\kanghai-paper.mjs `
 默认输出到类似这样的当期目录，避免覆盖旧报纸：
 
 ```text
-kanghai-daily/reports/runs/T081_公元230年_20260513-195733/
+kanhai-daily/reports/runs/T081_公元230年_20260513-195733/
 ```
 
 当期目录内会包含：
@@ -62,15 +64,15 @@ kanghai-daily/reports/runs/T081_公元230年_20260513-195733/
 只生成脱敏素材和提示词，不调用 LLM：
 
 ```powershell
-node .\kanghai-daily\scripts\kanghai-paper.mjs --no-llm
+node .\kanhai-daily\scripts\kanhai-paper.mjs --no-llm
 ```
 
 指定写作倾向：
 
 ```powershell
-node .\kanghai-daily\scripts\kanghai-paper.mjs --style 悼文
-node .\kanghai-daily\scripts\kanghai-paper.mjs --style 文言
-node .\kanghai-daily\scripts\kanghai-paper.mjs --style 独家消息
+node .\kanhai-daily\scripts\kanhai-paper.mjs --style 悼文
+node .\kanhai-daily\scripts\kanhai-paper.mjs --style 文言
+node .\kanhai-daily\scripts\kanhai-paper.mjs --style 独家消息
 ```
 
 ## 栏目设计
@@ -110,7 +112,7 @@ node .\kanghai-daily\scripts\kanghai-paper.mjs --style 独家消息
 
 ## 信源核对稿
 
-每次运行 `kanghai-paper.mjs` 都会在当期目录内额外生成 `evidence.md`。这份文件用于人工核稿，不建议发群。
+每次运行 `kanhai-paper.mjs` 都会在当期目录内额外生成 `evidence.md`。这份文件用于人工核稿，不建议发群。
 
 它会展示：
 
@@ -119,7 +121,7 @@ node .\kanghai-daily\scripts\kanghai-paper.mjs --style 独家消息
 - 文明指标的原始数值，以及这些数值如何变成“高位”“低迷”“军势醒目”等 brief 标签。
 - 政治概览里的正式宣战、友好宣言和城邦保护关系；正式宣战会附带存档外交状态、`DeclaredWarOnUs` 等可追溯依据，友好关系不会被当作和平保证。
 - 公开战争、贸易传闻和近期通知的真实文本。
-- 夺城与城市易手台账，例如城市原属、现属、发生时间和城市量级。
+- 夺城与城市易手台账，例如城市原属、现属、发生时间、城市量级，以及是否有原始首都/旧都信源。
 - 战区态势核对，例如交战/对峙双方、总体军势比例带、产能比例带、前线兵影比例带和地形趋势。
 - 每条真实通知进入 brief 前的降敏写法。
 - 脱敏地图趋势，例如某文明周边是否出现他国兵影、蛮族压力或外向兵影。
@@ -131,7 +133,7 @@ node .\kanghai-daily\scripts\kanghai-paper.mjs --style 独家消息
 也可以指定输出位置：
 
 ```powershell
-node .\kanghai-daily\scripts\kanghai-paper.mjs --evidence-out .\kanghai-daily\reports\evidence.md
+node .\kanhai-daily\scripts\kanhai-paper.mjs --evidence-out .\kanhai-daily\reports\evidence.md
 ```
 
 ## 累计时间线
@@ -141,17 +143,17 @@ node .\kanghai-daily\scripts\kanghai-paper.mjs --evidence-out .\kanghai-daily\re
 `reports/timeline.md` 是从长期库生成的阅读版，适合之后回顾战争、奇观和时代变化。普通边境提示、城市涨人口、零散蛮族消息不会进入这里。
 
 ```powershell
-node .\kanghai-daily\scripts\kanghai-paper.mjs --no-llm --no-timeline
+node .\kanhai-daily\scripts\kanhai-paper.mjs --no-llm --no-timeline
 ```
 
 可以用 `--no-timeline` 临时跳过时间线更新。
 
 ## 后台分析线
 
-`scripts/kanghai-daily.mjs` 是旧的后台分析脚本，会输出更像数据简报的 `reports/latest.md`。它适合调试，不建议直接发群。
+`scripts/kanhai-daily.mjs` 是旧的后台分析脚本，会输出更像数据简报的 `reports/latest.md`。它适合调试，不建议直接发群。
 
 ```powershell
-node .\kanghai-daily\scripts\kanghai-daily.mjs --out .\kanghai-daily\reports\latest.md
+node .\kanhai-daily\scripts\kanhai-daily.mjs --out .\kanhai-daily\reports\latest.md
 ```
 
 ## 关键代码来源

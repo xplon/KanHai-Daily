@@ -13,6 +13,7 @@ const DEFAULT_LOCAL_SAVE = "D:/Program/Unciv/SaveFiles/Autosave";
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_DIR = path.resolve(SCRIPT_DIR, "..");
 const WORKSPACE_DIR = path.resolve(PROJECT_DIR, "..");
+const LEGACY_ENV_PREFIX = "KANG" + "HAI";
 
 const rankingKeys = {
   S: "score",
@@ -183,8 +184,8 @@ function parseArgs(argv) {
     timelineOut: path.join(PROJECT_DIR, "reports", "timeline.md"),
     timelineJsonOut: path.join(PROJECT_DIR, "reports", "timeline.json"),
     style: "auto",
-    maxTokens: Number(process.env.KANGHAI_MAX_TOKENS || 1800),
-    temperature: Number(process.env.KANGHAI_TEMPERATURE || 0.9),
+    maxTokens: Number(process.env.KANHAI_MAX_TOKENS || process.env[`${LEGACY_ENV_PREFIX}_MAX_TOKENS`] || 1800),
+    temperature: Number(process.env.KANHAI_TEMPERATURE || process.env[`${LEGACY_ENV_PREFIX}_TEMPERATURE`] || 0.9),
     noLlm: false,
     noFactCheck: false,
     noTimeline: false,
@@ -237,7 +238,7 @@ function parseArgs(argv) {
 
 function printHelp() {
   console.log(`Usage:
-  node kanghai-daily/scripts/kanghai-paper.mjs [options]
+  node kanhai-daily/scripts/kanhai-paper.mjs [options]
 
 Options:
   --source remote|local      Data source, defaults to remote
@@ -730,6 +731,8 @@ function cityCaptureRecords(game) {
   for (const civ of getMajorCivs(game)) {
     for (const city of civ.cities || []) {
       if (!city.foundingCiv || city.foundingCiv === civ.civID) continue;
+      const isOriginalCapital = Boolean(city.isOriginalCapital);
+      const cityRole = isOriginalCapital ? "原始首都/旧都" : "普通旧城";
       records.push({
         turn: city.turnAcquired ?? null,
         city: city.name,
@@ -738,8 +741,10 @@ function cityCaptureRecords(game) {
         rawCurrentOwner: civ.civID,
         rawOriginalOwner: city.foundingCiv,
         isMajorOriginalOwner: major.has(city.foundingCiv),
+        isOriginalCapital,
+        cityRole,
         populationBand: cityPopulation(city) >= 7 ? "大城" : cityPopulation(city) >= 4 ? "中等城市" : "小城",
-        text: `${displayCiv(civ.civID)}夺取了${displayCiv(city.foundingCiv)}旧城${city.name}`,
+        text: `${displayCiv(civ.civID)}夺取了${displayCiv(city.foundingCiv)}${isOriginalCapital ? "旧都" : "旧城"}${city.name}`,
       });
     }
   }
@@ -866,7 +871,7 @@ function buildConflictTheaters(game, metrics, captures, declaredWars) {
       candidate.declaredWar ? `${candidate.civA}与${candidate.civB}处于正式战争状态。` : "",
       relatedCaptures.length
         ? `${candidate.civA}与${candidate.civB}之间存在夺城旧账：${relatedCaptures
-            .map((capture) => `${capture.currentOwner}夺取${capture.originalOwner}旧城${capture.city}`)
+            .map((capture) => `${capture.currentOwner}夺取${capture.originalOwner}${capture.isOriginalCapital ? "旧都" : "旧城"}${capture.city}`)
             .join("；")}。`
         : "",
       `双方对比：${militaryBalance}，${productionBalance}。`,
@@ -886,6 +891,8 @@ function buildConflictTheaters(game, metrics, captures, declaredWars) {
         from: capture.originalOwner,
         to: capture.currentOwner,
         cityWeight: capture.populationBand,
+        cityRole: capture.cityRole,
+        formerCapital: capture.isOriginalCapital,
       })),
       balance: {
         military: militaryBalance,
@@ -1378,20 +1385,35 @@ function buildSourceClaims(
       [`DIP-FRIEND-${friend.civA}-${friend.civB}`],
     );
   }
-  for (const wonder of culturalSignals.wonders || []) {
-    for (const text of wonder.publicSignals || []) {
-      add("奇观格局", text, "城市 builtBuildings 与文明 naturalWonders 的脱敏整理", [wonder.id]);
-    }
+  const wonderHighlights = [...(culturalSignals.wonders || [])]
+    .sort((a, b) => (b.wonders.length + b.naturalWonders.length) - (a.wonders.length + a.naturalWonders.length))
+    .slice(0, 4);
+  for (const wonder of wonderHighlights) {
+    add(
+      "奇观格局",
+      wonder.publicSignals.join("；"),
+      "城市 builtBuildings 与文明 naturalWonders 的脱敏整理",
+      [wonder.id],
+    );
   }
-  for (const religion of culturalSignals.religions || []) {
-    for (const text of religion.publicSignals || []) {
-      add("宗教格局", text, "全局 religions、文明 religionManager 与城市宗教字段整理", [religion.id]);
-    }
+  const religionHighlights = (culturalSignals.religions || [])
+    .filter((religion) => /强化|创立/.test(religion.state) || religion.holyReligions.length)
+    .slice(0, 5);
+  for (const religion of religionHighlights) {
+    add(
+      "宗教格局",
+      religion.publicSignals.join("；"),
+      "全局 religions、文明 religionManager 与城市宗教字段整理",
+      [religion.id],
+    );
   }
-  for (const policy of culturalSignals.policies || []) {
-    for (const text of policy.publicSignals || []) {
-      add("政策口径", text, "文明 adoptedPolicies 的制度取向整理", [policy.id]);
-    }
+  for (const policy of (culturalSignals.policies || []).slice(0, 2)) {
+    add(
+      "政策口径",
+      policy.publicSignals.join("；"),
+      "文明 adoptedPolicies 的制度取向整理",
+      [policy.id],
+    );
   }
   for (const signal of mapSignals) {
     for (const text of signal.publicSignals || []) {
@@ -1588,11 +1610,11 @@ function buildExpertPanels(metrics, wars, trades, conflictTheaters = [], politic
     ].filter(Boolean),
     culturalAnalyst: [
       cultureLeader ? `${cultureLeader.displayName}文化声量较高，可适合作为副刊素材。` : "",
-      wonderLeader ? `${wonderLeader.civ}的奇观素材较醒目，可写成宫廷美术、朝圣路线或世界遗产争鸣。` : "",
+      wonderLeader ? `${wonderLeader.civ}的奇观素材较醒目，可作为一两句宫廷美术或世界遗产梗，不宜铺成清单。` : "",
       matureReligions.length
-        ? `宗教专栏可参考：${matureReligions.map((record) => `${record.civ}（${record.state}）`).join("；")}。`
+        ? `宗教专栏可择一使用：${matureReligions.map((record) => `${record.civ}（${record.state}）`).join("；")}；不要全员点名。`
         : "",
-      broadPolicy ? `${broadPolicy.posture}取向覆盖面较广，可写成“各国议会共同抄作业”。` : "",
+      broadPolicy ? `${broadPolicy.posture}取向覆盖面较广，适合写进编辑部按语或独家密电的小讽刺。` : "",
       "世界广播、宗教与奇观消息可写成文明自信或祭司宣传。",
     ].filter(Boolean),
     militaryAnalyst: [
@@ -1648,9 +1670,11 @@ async function buildBrief(game) {
   }
   if (conflictTheaters.length) preferredColumns.push("战地通讯");
   if (events.some((event) => event.kind === "全球广播") || culturalSignals.wonders.length) preferredColumns.push("科学与奇观");
-  if (culturalSignals.religions.length || culturalSignals.policies.length) preferredColumns.push("文化副刊");
   preferredColumns.push("独家密电");
   preferredColumns.push("市井版");
+  if (!conflictTheaters.length && (culturalSignals.religions.length || culturalSignals.policies.length)) {
+    preferredColumns.push("文化副刊");
+  }
 
   const editorialAngles = [
     weakest
@@ -1664,6 +1688,8 @@ async function buildBrief(game) {
         ? `有公开战争素材：${wars.join("；")}。`
         : "没有适合头版的全面战争，可写“和平时期的不和平现象”。",
     "版面要正交：每个栏目尽量处理不同主题或不同文明，不要所有栏目都围绕同一个国家、同一件事反复写。",
+    "奇观、宗教、政策素材只做调味，不要写成全世界文化/宗教名录；战争与夺城旧账仍是头条骨架。",
+    "保留旧报纸的短促讽刺感，结尾用“本报编辑部按”把局势收束成一段好笑但可靠的按语。",
     "本期可以把现实历史和游戏历史当作同一条时间线处理，不要刻意说“真实世界如何、游戏里如何”。",
   ].filter(Boolean);
 
@@ -1727,6 +1753,8 @@ async function buildBrief(game) {
         from: capture.originalOwner,
         to: capture.currentOwner,
         cityWeight: capture.populationBand,
+        cityRole: capture.cityRole,
+        formerCapital: capture.isOriginalCapital,
       })),
   };
 
@@ -1806,7 +1834,7 @@ function gameVersionText(game) {
 
 function buildSourcePack(game, brief, args) {
   return {
-    schema: "kanghai-daily-source-pack/v1",
+    schema: "kanhai-daily-source-pack/v1",
     visibility: "llm_visible",
     generatedAt: new Date().toISOString(),
     note: "brief 字段就是 ai-prompt.md 中交给 LLM 的完整脱敏 JSON 素材。metadata 仅用于本地核稿，不要求 LLM 使用。",
@@ -1987,14 +2015,17 @@ async function buildEvidenceReport(game, brief, args, sourcePack) {
       capture.originalOwner,
       capture.currentOwner,
       capture.populationBand,
-      "城市归属与 turnAcquired 推导；不展示坐标。",
+      capture.cityRole,
+      capture.isOriginalCapital ? "city.isOriginalCapital = true，可写旧都/首都陷落叙事" : "非原始首都，只能写旧城/城市易手",
     ]);
 
   const theaterRows = conflictTheaters.map((theater) => [
     theater.id,
     theater.civs.join(" vs "),
     theater.status,
-    theater.capturedCities?.map((city) => `${city.to}夺取${city.from}旧城${city.city}`).join("；") || "无夺城记录",
+    theater.capturedCities
+      ?.map((city) => `${city.to}夺取${city.from}${city.formerCapital ? "旧都" : "旧城"}${city.city}`)
+      .join("；") || "无夺城记录",
     theater.balance?.military || "",
     theater.balance?.production || "",
     theater.balance?.front || "",
@@ -2147,7 +2178,7 @@ ${markdownTable(["ID", "类型", "对象", "真实看海信息", "进入 brief/�
 
 这些记录是战局复盘最重要的显式信息之一，只记录城市归属变化，不展示坐标。
 
-${markdownTable(["ID", "时间", "城市", "原属", "现属", "城市量级", "依据"], captureRows)}
+${markdownTable(["ID", "时间", "城市", "原属", "现属", "城市量级", "都城状态", "依据"], captureRows)}
 ## 七、战区态势核对
 
 这里把夺城记录、双方总体军势/产能、前线兵影和地形合并成脱敏战区判断。LLM 只看到比例带和趋势，不看到具体部署。
@@ -2221,16 +2252,22 @@ async function buildPrompt(brief, args) {
 本期要求：
 
 - ${styleHint}
+- 开头固定两行：第一行“看海日报”；第二行“${brief.dateline.year}·四个汉字副题”。副题由你拟，必须是四个汉字，不要写“四个汉字副题”这几个字。
+- 结尾必须有“本报编辑部按：”，用 1-3 句诙谐总结当前局势。
 - 必须使用纪年：${brief.dateline.year}，不要写回合数。
 - 所有具体事实只能来自 brief.publicEvents、brief.strategicSignals、brief.sourceClaims 和 mildlySensitiveIntel.expertPanels；不要凭空增加具体战果、条约、工程、奇观、文明关系或城市状态。
 - brief.sourceClaims 是事实锚点；可以文学化改写，但不要在公开稿里输出 SRC 编号。
+- 夺城记录默认只能写成“旧城”“城池”“城市易手”；只有 formerCapital=true 或 cityRole 明确标注“原始首都/旧都”时，才可以写“旧都”“首都陷落”“都城”。
 - 不要写“来自某方向”“沿某路”“逼近某城”“某城附近”这类方向性或位置性暗示。
+- 未在 brief 中给出方向时，不要写东、西、南、北、一东一西、南方兵锋等地理方向词。
 - 不要在公开稿里出现 JSON 字段名或技术证据名，例如 diplomaticStatus、DeclaredWarOnUs、CapturedOurCities、sourceClaims、declaredWar 等。
+- 除非 brief 中的城市名、宗教自定义名或奇观名本来就是英文，否则不要夹英文；政策取向要写“荣誉”“自由”这类中文，不要写 honor、liberty。
 - wonderLedger、religionLandscape、policyPosture 只可写作已完成奇观、宗教旗号和制度取向；不要推测当前建造队列或未公开科技路线。
+- 奇观、宗教和政策素材只做调味，最多挑一两个最有梗的事实，不要写成文化名录。
 - 版面不能固定化。栏目之间尽量主题正交，不要所有栏目都写同一个国家或同一件事。
 - 讣告与悼文是罕见栏目，只有失城、首都陷落、亡国边缘或 brief 明确强烈支持时才写。
 - 已宣战战争、城市易手、夺城旧账、战区力量对比的优先级高于财政或普通内政趋势。财政只能作为旁注。
-- 除纪年和报纸期号外，不要写任何看似精确的次数、数量、排名或清单。
+- 除纪年和报纸期号外，不要写任何看似精确的次数、数量、排名或清单；用“多国”“部分国家”“若干”代替。
 - 可以从固定栏目中选 2-4 个，但不要机械铺满所有栏目。
 - 正文全部由你撰写；不要输出 JSON，不要列数据表。
 
@@ -2245,7 +2282,7 @@ ${JSON.stringify(brief, null, 2)}
 async function callAnthropic(prompt, args, options = {}) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    throw new Error("Missing ANTHROPIC_API_KEY. Put it in kanghai-daily/.env or the process environment.");
+    throw new Error("Missing ANTHROPIC_API_KEY. Put it in kanhai-daily/.env or the process environment.");
   }
   const baseUrl = (process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com").replace(/\/+$/, "");
   const model = process.env.ANTHROPIC_MODEL || "claude-opus-4-6";
@@ -2253,7 +2290,9 @@ async function callAnthropic(prompt, args, options = {}) {
     model,
     max_tokens: options.maxTokens ?? args.maxTokens,
     temperature: options.temperature ?? args.temperature,
-    system: options.system || "你是看海日报总编辑。只输出可直接发到 QQ 群的中文报纸稿，不输出解释。",
+    system:
+      options.system ||
+      "你是看海日报总编辑。只输出可直接发到 QQ 群的中文报纸稿，不输出解释。除素材中的必要专名外，不要夹英文。",
     messages: [{ role: "user", content: prompt }],
   };
 
@@ -2411,10 +2450,11 @@ async function buildTimelineEntries(game, brief) {
       year,
       category: "城市易手",
       civ: `${capture.originalOwner}→${capture.currentOwner}`,
-      summary: `${capture.currentOwner}夺取${capture.originalOwner}旧城${capture.city}`,
+      summary: `${capture.currentOwner}夺取${capture.originalOwner}${capture.isOriginalCapital ? "旧都" : "旧城"}${capture.city}`,
       importance: "major",
       source: "city_owner_and_turnAcquired",
       privacy: "city_level_sanitized",
+      formerCapital: capture.isOriginalCapital,
     });
   }
 
@@ -2444,8 +2484,10 @@ function renderTimelineMarkdown(entries) {
 
 async function updateTimeline(game, brief, args) {
   if (args.noTimeline) return null;
-  const existing = await readJsonIfPresent(args.timelineJsonOut, { schema: "kanghai-daily-major-timeline/v2", entries: [] });
-  const entries = existing.schema === "kanghai-daily-major-timeline/v2" ? existing.entries || [] : [];
+  const existing = await readJsonIfPresent(args.timelineJsonOut, { schema: "kanhai-daily-major-timeline/v2", entries: [] });
+  const legacyTimelineSchema = "kang" + "hai-daily-major-timeline/v2";
+  const acceptedSchemas = new Set(["kanhai-daily-major-timeline/v2", legacyTimelineSchema]);
+  const entries = acceptedSchemas.has(existing.schema) ? existing.entries || [] : [];
   const timelineKey = (entry) => (entry.category === "全球广播" ? `world|${entry.summary}` : entry.key);
   const keepTimelineEntry = (entry) => ["全球广播", "城市易手"].includes(entry.category);
   const byKey = new Map();
@@ -2463,7 +2505,7 @@ async function updateTimeline(game, brief, args) {
     if (!current || (entry.turn ?? Infinity) < (current.turn ?? Infinity)) byKey.set(key, { ...entry, key });
   }
   const next = {
-    schema: "kanghai-daily-major-timeline/v2",
+    schema: "kanhai-daily-major-timeline/v2",
     updatedAt: new Date().toISOString(),
     entries: [...byKey.values()].sort((a, b) => (a.turn ?? 0) - (b.turn ?? 0) || a.summary.localeCompare(b.summary, "zh-Hans-CN")),
   };
