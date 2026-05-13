@@ -1,0 +1,4 @@
+data/snapshots/
+node_modules/
+.env
+reports/
