@@ -154,18 +154,24 @@ function findDateline(lines, brief, runInfo) {
 }
 
 function extractSectionHeading(rawLine) {
+  const raw = rawLine.trim();
+  const isMarkdownHeading = /^\s{0,3}#{1,6}\s+/.test(rawLine);
+  const isBoldLine = /^\*\*[^*].*\*\*\s*$/.test(raw);
   const line = rawLine
     .trim()
     .replace(/^\s{0,3}#{1,6}\s+/, "")
     .replace(/^\*\*/, "")
     .replace(/\*\*$/, "")
     .trim();
-  const match = /^【([^】]+)】\s*(.*)$/.exec(line);
-  if (!match) return null;
-  const explicitHeadline = stripInline(match[2]);
+  const bracketMatch = /^【([^】]+)】\s*(.*)$/.exec(line);
+  const colonMatch = isMarkdownHeading || isBoldLine ? /^([^：:\n]{2,18})[：:]\s*(.+)$/.exec(line) : null;
+  const section = bracketMatch?.[1] || colonMatch?.[1] || "";
+  const headlineText = bracketMatch?.[2] || colonMatch?.[2] || "";
+  if (!section) return null;
+  const explicitHeadline = stripInline(headlineText);
   return {
-    section: stripInline(match[1]),
-    headline: explicitHeadline || stripInline(match[1]),
+    section: stripInline(section),
+    headline: explicitHeadline || stripInline(section),
     hasExplicitHeadline: Boolean(explicitHeadline),
   };
 }

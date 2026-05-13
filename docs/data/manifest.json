@@ -1,0 +1,38 @@
+{
+  "schema": "kanhai-pages/v1",
+  "updatedAt": "2026-05-13T17:20:24.327Z",
+  "latest": {
+    "gameId": "2ec21879",
+    "issueId": "t082-20260514-005535"
+  },
+  "games": [
+    {
+      "id": "2ec21879",
+      "name": "对局 2ec21879",
+      "shortId": "2ec21879",
+      "latestIssueId": "t082-20260514-005535",
+      "issues": [
+        {
+          "id": "t082-20260514-005535",
+          "title": "鹰与猫的百年账",
+          "paperName": "看海日报",
+          "dateline": "公元260年·天命未决",
+          "year": "公元260年",
+          "turn": 82,
+          "generatedAt": "2026-05-14T00:55:35+08:00",
+          "generatedAtLabel": "2026-05-14 00:55:35"
+        },
+        {
+          "id": "t082-20260513-221516",
+          "title": "旧账与铁幕",
+          "paperName": "看海日报",
+          "dateline": "公元260年·铁幕低垂",
+          "year": "公元260年",
+          "turn": 82,
+          "generatedAt": "2026-05-13T22:15:16+08:00",
+          "generatedAtLabel": "2026-05-13 22:15:16"
+        }
+      ]
+    }
+  ]
+}
