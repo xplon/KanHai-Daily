@@ -163,10 +163,6 @@ function hashGame(game) {
   return createHash("sha1").update(stableJson(game)).digest("hex");
 }
 
-function safeName(value) {
-  return String(value || "unknown").replace(/[^\w.-]+/g, "_").replace(/^_+|_+$/g, "");
-}
-
 async function readPreviousSnapshot(snapshotDir, gameId, currentHash) {
   const latest = path.join(snapshotDir, gameId, "latest.json");
   try {
@@ -196,8 +192,7 @@ async function writeSnapshot(snapshotDir, game, currentHash) {
   const text = `${JSON.stringify(game, null, 2)}\n`;
   if (latestHash !== currentHash) {
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const player = safeName(game.currentPlayer);
-    const file = path.join(dir, `turn-${String(game.turns ?? 0).padStart(3, "0")}-${player}-${currentHash.slice(0, 8)}-${stamp}.json`);
+    const file = path.join(dir, `turn-${String(game.turns ?? 0).padStart(3, "0")}-${currentHash.slice(0, 8)}-${stamp}.json`);
     await fs.writeFile(file, text, "utf8");
   }
   await fs.writeFile(latest, text, "utf8");
@@ -485,7 +480,6 @@ function formatReport({ game, previous, sourceLabel, args }) {
   const events = recentEvents(game, args.maxEvents);
   const version = game.version?.createdWith?.text || "unknown";
   const mods = game.gameParameters?.mods || [];
-  const current = game.currentPlayer || "unknown";
   const generatedAt = new Date().toLocaleString("zh-CN", { hour12: false });
 
   const scoreLeader = topBy(metrics, "score", 1)[0];
@@ -496,7 +490,6 @@ function formatReport({ game, previous, sourceLabel, args }) {
   lines.push(`# 看海日报 T${game.turns ?? "?"}`);
   lines.push("");
   lines.push(`生成时间：${generatedAt}`);
-  lines.push(`当前行动：${current}`);
   lines.push(`版本：${version}`);
   lines.push(`数据源：${sourceLabel}`);
   lines.push("");

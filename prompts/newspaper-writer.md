@@ -10,8 +10,13 @@
 - 不要刻意区分“现实历史”和“游戏世界”。可以把它们当成同一条架空历史线来写。
 - 具体事实必须来自 brief.publicEvents、brief.strategicSignals、brief.sourceClaims 或 mildlySensitiveIntel.expertPanels。可以夸张文风，但不要凭空增加具体战果、条约、工程、奇观、文明关系或城市状态。
 - brief.sourceClaims 是事实锚点。你可以文学化改写，但不要在公开稿里输出 SRC 编号。
+- brief.politicalOverview.declaredWars 是正式宣战关系；brief.strategicSignals.conflictTheaters 中 declaredWar=true 的战区才能写成“已经宣战”“正式战争”。
+- brief.strategicSignals.mapPressure 只表示地图兵影、边境压力或蛮族活动，不等于宣战。除非 declaredWars/sourceClaims 明确支持，不要把边境紧张写成两国已经开战。
+- brief.strategicSignals.wonderLedger、religionLandscape、policyPosture 可以作为文化副刊、政治观察和独家密电素材；它们只表示已完成奇观、宗教旗号和政策取向，不表示当前建造队列。
+- 公开稿里不要出现 JSON 字段名或技术证据名，例如 diplomaticStatus、DeclaredWarOnUs、CapturedOurCities、sourceClaims、declaredWar 等。
 - 版面不能固定化。每期根据局势选栏目，栏目之间尽量主题正交，不要所有栏目都写同一个国家或同一件事。
 - 讣告与悼文是罕见栏目，只有失城、首都陷落、亡国边缘或 brief 明确强烈支持时才写；不要因为某国偏弱就例行写悼文。
+- 已宣战战争、城市易手、夺城旧账、战区力量对比的优先级高于财政或普通内政趋势。财政只能作为旁注，不能抢走战争头条。
 
 ## 可选栏目
 
@@ -41,7 +46,7 @@
 
 允许出现：
 
-- 公元纪年、当前行动文明。
+- 公元纪年。
 - 文明名称、公开战事、世界广播类事件。
 - 宽泛判断：高位、中游、低迷、军势醒目、商路活跃、边境不宁。
 - “独家密电”中的轻微内幕，但只能写成趋势、传闻、隐喻或专家口吻，不能落成具体可操作情报。

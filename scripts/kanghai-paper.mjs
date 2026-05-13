@@ -48,6 +48,9 @@ const buildingNameMap = {
   "The Pyramids": "金字塔",
   "Great Wall": "长城",
   "Hanging Gardens": "空中花园",
+  "Mausoleum of Halicarnassus": "摩索拉斯陵墓",
+  "The Great Lighthouse": "大灯塔",
+  "The Oracle": "神谕所",
   Stonehenge: "巨石阵",
   Petra: "佩特拉",
   Colosseum: "斗兽场",
@@ -55,6 +58,38 @@ const buildingNameMap = {
   Monument: "纪念碑",
   Park: "公园",
   "Statue of Zeus": "宙斯像",
+};
+
+const naturalWonderNameMap = {
+  Krakatoa: "喀拉喀托",
+  Uluru: "乌鲁鲁",
+  "Old Faithful": "老忠实泉",
+};
+
+const religionNameMap = {
+  "Dance of the Aurora": "极光之舞",
+  "God of the Sea": "海神信仰",
+  "God of Craftsman": "工匠之神",
+  "God of Craftsmen": "工匠之神",
+  Taoism: "道教",
+  "Oral Tradition": "口述传统",
+  "Religious Idols": "宗教偶像",
+  Sikhism: "锡克教",
+  Judaism: "犹太教",
+  Christianity: "基督教",
+  "Messenger of the Gods": "诸神信使",
+};
+
+const policyNameMap = {
+  Honor: "荣誉",
+  Tradition: "传统",
+  Liberty: "自由",
+  Piety: "虔信",
+  Patronage: "庇护",
+  Aesthetics: "美学",
+  Commerce: "商业",
+  Exploration: "探索",
+  Rationalism: "理性",
 };
 
 const eraNameMap = {
@@ -355,6 +390,20 @@ function displayBuilding(building) {
   return buildingNameMap[building] || building;
 }
 
+function displayNaturalWonder(wonder) {
+  return naturalWonderNameMap[wonder] || wonder;
+}
+
+function displayReligion(religion, game = null) {
+  const record = game?.religions?.[religion];
+  if (record?.displayName && record.displayName !== religion) return record.displayName;
+  return religionNameMap[religion] || record?.displayName || religion;
+}
+
+function displayPolicy(policy) {
+  return policyNameMap[policy] || policy;
+}
+
 function displayEra(era) {
   return eraNameMap[era] || era;
 }
@@ -384,6 +433,58 @@ function getMajorCivs(game) {
     if (civ.civID === "Barbarians" || civ.civID === "Spectator") return false;
     return civ.playerType === "Human" || (civ.cities || []).length >= 2;
   });
+}
+
+function getPoliticalCivs(game) {
+  return (game.civilizations || []).filter((civ) => {
+    if (!civ.civID || civ.civID === "Barbarians" || civ.civID === "Spectator") return false;
+    return civ.playerType === "Human" || (civ.cities || []).length > 0;
+  });
+}
+
+function isMajorPoliticalCiv(civ) {
+  return civ?.playerType === "Human" || (civ?.cities || []).length >= 2;
+}
+
+function savedDiplomaticStatus(diplo) {
+  // Unciv's DiplomacyManager defaults diplomaticStatus to War, so default values may be omitted from JSON.
+  return diplo?.diplomaticStatus || "War";
+}
+
+function diplomacyEntry(game, rawA, rawB) {
+  const civ = (game.civilizations || []).find((item) => item.civID === rawA);
+  return civ?.diplomacy?.[rawB] || null;
+}
+
+function warBasisForPair(game, rawA, rawB) {
+  const basis = [];
+  const push = (text) => {
+    if (text && !basis.includes(text)) basis.push(text);
+  };
+
+  for (const [holder, other] of [
+    [rawA, rawB],
+    [rawB, rawA],
+  ]) {
+    const diplo = diplomacyEntry(game, holder, other);
+    if (!diplo) continue;
+    if (diplo.diplomaticStatus === "War") {
+      push(`${displayCiv(holder)}对${displayCiv(other)}的存档外交状态为 War`);
+    } else if (savedDiplomaticStatus(diplo) === "War") {
+      push(`${displayCiv(holder)}对${displayCiv(other)}未写 diplomaticStatus，按 Unciv 默认值 War 解释`);
+    }
+    if (diplo.flagsCountdown?.DeclaredWar) {
+      push(`${displayCiv(holder)}对${displayCiv(other)}保留 DeclaredWar 外交旗标`);
+    }
+    if (Number.isFinite(diplo.diplomaticModifiers?.DeclaredWarOnUs)) {
+      push(`${displayCiv(holder)}对${displayCiv(other)}记录了 DeclaredWarOnUs 外交修正`);
+    }
+    if (Number.isFinite(diplo.diplomaticModifiers?.CapturedOurCities)) {
+      push(`${displayCiv(holder)}对${displayCiv(other)}记录了 CapturedOurCities 外交修正`);
+    }
+  }
+
+  return basis;
 }
 
 function cityPopulation(city) {
@@ -514,20 +615,23 @@ function civProfiles(metrics) {
 }
 
 function activeWarRecords(game) {
-  const major = new Set(getMajorCivs(game).map((civ) => civ.civID));
+  const political = new Map(getPoliticalCivs(game).map((civ) => [civ.civID, civ]));
   const wars = new Map();
-  for (const civ of game.civilizations || []) {
-    if (!major.has(civ.civID)) continue;
+  for (const civ of getPoliticalCivs(game)) {
     for (const [other, diplo] of Object.entries(civ.diplomacy || {})) {
-      if (!major.has(other) || diplo.diplomaticStatus !== "War") continue;
+      if (!political.has(other) || savedDiplomaticStatus(diplo) !== "War") continue;
       const [rawA, rawB] = [civ.civID, other].sort();
       const key = `${rawA}|${rawB}`;
+      const civA = political.get(rawA);
+      const civB = political.get(rawB);
       wars.set(key, {
         civA: displayCiv(rawA),
         civB: displayCiv(rawB),
         rawCivA: rawA,
         rawCivB: rawB,
         status: "War",
+        basis: warBasisForPair(game, rawA, rawB),
+        scope: isMajorPoliticalCiv(civA) && isMajorPoliticalCiv(civB) ? "major_war" : "city_state_war",
         text: [displayCiv(rawA), displayCiv(rawB)].join(" vs "),
       });
     }
@@ -566,6 +670,58 @@ function activeTradeRecords(game) {
 
 function activeTrades(game) {
   return activeTradeRecords(game).map((trade) => trade.text);
+}
+
+function diplomaticRelationRecords(game) {
+  const political = new Map(getPoliticalCivs(game).map((civ) => [civ.civID, civ]));
+  const friendship = new Map();
+  const protectorates = new Map();
+  const warmRelations = new Map();
+
+  for (const civ of getPoliticalCivs(game)) {
+    for (const [other, diplo] of Object.entries(civ.diplomacy || {})) {
+      if (!political.has(other)) continue;
+      const [rawA, rawB] = [civ.civID, other].sort();
+      const key = `${rawA}|${rawB}`;
+      const status = savedDiplomaticStatus(diplo);
+      const relation = {
+        civA: displayCiv(rawA),
+        civB: displayCiv(rawB),
+        rawCivA: rawA,
+        rawCivB: rawB,
+        status,
+      };
+      if (diplo.flagsCountdown?.DeclarationOfFriendship) {
+        friendship.set(key, {
+          ...relation,
+          turnsLeft: diplo.flagsCountdown.DeclarationOfFriendship,
+          text: `${displayCiv(rawA)}与${displayCiv(rawB)}存在正式友好宣言`,
+        });
+      }
+      if (status === "Protector") {
+        protectorates.set(key, {
+          ...relation,
+          text: `${displayCiv(rawA)}与${displayCiv(rawB)}存在保护关系`,
+        });
+      }
+      if (
+        status !== "War" &&
+        ((diplo.smoothedOpinionOfOtherCiv ?? 0) >= 45 || diplo.diplomaticModifiers?.DeclarationOfFriendship >= 20)
+      ) {
+        warmRelations.set(key, {
+          ...relation,
+          text: `${displayCiv(rawA)}与${displayCiv(rawB)}关系口径友好`,
+        });
+      }
+    }
+  }
+
+  return {
+    declaredWars: activeWarRecords(game),
+    formalFriendships: [...friendship.values()].sort((a, b) => a.text.localeCompare(b.text, "zh-Hans-CN")),
+    protectorates: [...protectorates.values()].sort((a, b) => a.text.localeCompare(b.text, "zh-Hans-CN")),
+    warmRelations: [...warmRelations.values()].sort((a, b) => a.text.localeCompare(b.text, "zh-Hans-CN")),
+  };
 }
 
 function cityCaptureRecords(game) {
@@ -656,10 +812,10 @@ function frontUnitCounts(game, rawA, rawB) {
   return { aNearB, bNearA };
 }
 
-function buildConflictTheaters(game, metrics, captures) {
+function buildConflictTheaters(game, metrics, captures, declaredWars) {
   const metricByRaw = new Map(metrics.map((item) => [item.civ, item]));
   const candidates = new Map();
-  const ensure = (rawA, rawB, reason, weight = 1) => {
+  const ensure = (rawA, rawB, reason, weight = 1, declared = false) => {
     if (!rawA || !rawB || rawA === rawB) return null;
     const key = pairKey(rawA, rawB);
     const [left, right] = key.split("|");
@@ -673,23 +829,23 @@ function buildConflictTheaters(game, metrics, captures) {
         civB: displayCiv(right),
         reasons: [],
         score: 0,
+        declaredWar: false,
+        warBasis: [],
       };
     existing.reasons.push(reason);
     existing.score += weight;
+    existing.declaredWar ||= declared;
     candidates.set(key, existing);
     return existing;
   };
 
-  for (const capture of captures) {
-    if (capture.isMajorOriginalOwner) ensure(capture.rawCurrentOwner, capture.rawOriginalOwner, "近期或历史夺城线索", 6);
+  for (const war of declaredWars.filter((item) => item.scope === "major_war")) {
+    const candidate = ensure(war.rawCivA, war.rawCivB, "政治概览显示两国已宣战", 12, true);
+    if (candidate) candidate.warBasis.push(...(war.basis || []));
   }
 
-  for (const signal of mapPressureSignals(game)) {
-    for (const otherName of [...signal.pressureFrom, ...signal.pressureToward]) {
-      const otherMetric = metrics.find((item) => item.displayName === otherName);
-      const selfMetric = metrics.find((item) => item.displayName === signal.civ);
-      if (selfMetric && otherMetric) ensure(selfMetric.civ, otherMetric.civ, "边境兵影线索", 2);
-    }
+  for (const capture of captures) {
+    if (capture.isMajorOriginalOwner) ensure(capture.rawCurrentOwner, capture.rawOriginalOwner, "近期或历史夺城线索", 6);
   }
 
   const theaters = [];
@@ -707,6 +863,7 @@ function buildConflictTheaters(game, metrics, captures) {
     const scienceBalance = compareBand(candidate.civA, candidate.civB, metricA.technologies, metricB.technologies, "科研积累");
     const terrain = frontTerrainSummary(game, candidate.rawA, candidate.rawB);
     const lines = [
+      candidate.declaredWar ? `${candidate.civA}与${candidate.civB}处于正式战争状态。` : "",
       relatedCaptures.length
         ? `${candidate.civA}与${candidate.civB}之间存在夺城旧账：${relatedCaptures
             .map((capture) => `${capture.currentOwner}夺取${capture.originalOwner}旧城${capture.city}`)
@@ -719,8 +876,10 @@ function buildConflictTheaters(game, metrics, captures) {
     theaters.push({
       id: `WAR-${candidate.civA}-${candidate.civB}`,
       civs: [candidate.civA, candidate.civB],
-      status: relatedCaptures.length ? "夺城旧账明确" : "边境兵影紧张",
+      status: candidate.declaredWar ? "已宣战并交战" : "夺城旧账明确",
+      declaredWar: candidate.declaredWar,
       reasons: [...new Set(candidate.reasons)],
+      warBasis: [...new Set(candidate.warBasis)],
       capturedCities: relatedCaptures.map((capture) => ({
         year: capture.year,
         city: capture.city,
@@ -972,7 +1131,6 @@ function productionResearchCultureSignals(game) {
       productionTrend.includes("大涨") || productionTrend.includes("上扬")
         ? `${displayCiv(civ.civID)}工坊与市政系统近期较为忙碌。`
         : "",
-      treasuryTrend.includes("承压") ? `${displayCiv(civ.civID)}财政口径出现承压迹象。` : "",
     ].filter(Boolean);
 
     return {
@@ -1018,7 +1176,154 @@ function wonderCultureScienceSignals(events) {
   };
 }
 
-function buildSourceClaims(brief, mapSignals, trendSignals, broadcastSignals, conflictTheaters = []) {
+function worldWonderRecords(game, catalog) {
+  const wonderNames = new Set(
+    [...catalog.values()]
+      .filter((building) => building.isWonder)
+      .map((building) => building.name),
+  );
+
+  return getMajorCivs(game)
+    .map((civ) => {
+      const wonders = [];
+      for (const city of civ.cities || []) {
+        for (const building of city.cityConstructions?.builtBuildings || []) {
+          if (!wonderNames.has(building)) continue;
+          wonders.push({
+            name: displayBuilding(building),
+            rawName: building,
+            city: city.name,
+            capital: Boolean(city.isOriginalCapital),
+          });
+        }
+      }
+      const naturalWonders = (civ.naturalWonders || []).map((wonder) => ({
+        name: displayNaturalWonder(wonder),
+        rawName: wonder,
+      }));
+      const publicSignals = [
+        wonders.length
+          ? `${displayCiv(civ.civID)}拥有世界奇观：${wonders.map((wonder) => wonder.name).join("、")}。`
+          : "",
+        naturalWonders.length
+          ? `${displayCiv(civ.civID)}掌握自然奇观传闻：${naturalWonders.map((wonder) => wonder.name).join("、")}。`
+          : "",
+      ].filter(Boolean);
+
+      return {
+        id: `WONDER-${displayCiv(civ.civID)}`,
+        civ: displayCiv(civ.civID),
+        wonders,
+        naturalWonders,
+        publicSignals,
+      };
+    })
+    .filter((record) => record.publicSignals.length);
+}
+
+function religionStateLabel(state) {
+  return (
+    {
+      EnhancedReligion: "宗教体系已强化",
+      Religion: "创立宗教",
+      Pantheon: "万神殿阶段",
+      None: "无组织宗教",
+    }[state] || "宗教资料不足"
+  );
+}
+
+function religionLandscapeRecords(game) {
+  return getMajorCivs(game)
+    .map((civ) => {
+      const state = civ.religionManager?.religionState || "None";
+      const founded = Object.values(game.religions || {})
+        .filter((religion) => religion.foundingCivName === civ.civID)
+        .map((religion) => ({
+          name: displayReligion(religion.name, game),
+          rawName: religion.name,
+          displayName: religion.displayName || null,
+          fullReligion: Boolean(religion.displayName || religion.founderBeliefs?.length),
+          followerBeliefs: (religion.followerBeliefs || []).map((belief) => displayReligion(belief, game)),
+          founderBeliefs: (religion.founderBeliefs || []).map((belief) => displayReligion(belief, game)),
+        }));
+      const holyReligions = [];
+      const pressure = new Map();
+      for (const city of civ.cities || []) {
+        if (city.religion?.religionThisIsTheHolyCityOf) {
+          holyReligions.push(displayReligion(city.religion.religionThisIsTheHolyCityOf, game));
+        }
+        for (const [religion, value] of Object.entries(city.religion?.pressures || {})) {
+          pressure.set(religion, (pressure.get(religion) || 0) + value);
+        }
+      }
+      const topPressure = [...pressure.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([religion]) => displayReligion(religion, game));
+      const mainReligion = founded.find((religion) => religion.fullReligion) || founded.at(0);
+      const publicSignals = [
+        state !== "None" ? `${displayCiv(civ.civID)}宗教口径为${religionStateLabel(state)}。` : "",
+        mainReligion ? `${displayCiv(civ.civID)}的宗教旗号可写作“${mainReligion.name}”。` : "",
+        holyReligions.length ? `${displayCiv(civ.civID)}拥有圣城叙事素材：${[...new Set(holyReligions)].join("、")}。` : "",
+      ].filter(Boolean);
+
+      return {
+        id: `REL-${displayCiv(civ.civID)}`,
+        civ: displayCiv(civ.civID),
+        state: religionStateLabel(state),
+        foundedReligions: founded,
+        holyReligions: [...new Set(holyReligions)],
+        topPressure,
+        publicSignals,
+      };
+    })
+    .filter((record) => record.publicSignals.length);
+}
+
+function policyPostureRecords(game) {
+  const roots = new Map();
+  const complete = new Map();
+  for (const civ of getMajorCivs(game)) {
+    for (const policy of civ.policies?.adoptedPolicies || []) {
+      if (policy.endsWith(" Complete")) {
+        const root = policy.replace(/ Complete$/, "");
+        complete.set(root, [...(complete.get(root) || []), displayCiv(civ.civID)]);
+      } else if (policyNameMap[policy]) {
+        roots.set(policy, [...(roots.get(policy) || []), displayCiv(civ.civID)]);
+      }
+    }
+  }
+
+  return [...roots.entries()]
+    .map(([policy, civs]) => {
+      const uniqueCivs = [...new Set(civs)].sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+      const completedBy = [...new Set(complete.get(policy) || [])].sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+      const label = displayPolicy(policy);
+      const publicSignals = [
+        `${label}取向出现在${uniqueCivs.join("、")}的政治档案中。`,
+        completedBy.length ? `${completedBy.join("、")}的${label}制度建设已形成完整叙事。` : "",
+      ].filter(Boolean);
+      return {
+        id: `POL-${label}`,
+        posture: label,
+        civs: uniqueCivs,
+        completedBy,
+        publicSignals,
+      };
+    })
+    .filter((record) => record.civs.length)
+    .sort((a, b) => b.civs.length - a.civs.length || a.posture.localeCompare(b.posture, "zh-Hans-CN"));
+}
+
+function buildSourceClaims(
+  brief,
+  mapSignals,
+  trendSignals,
+  broadcastSignals,
+  conflictTheaters = [],
+  politicalOverview = null,
+  culturalSignals = {},
+) {
   const claims = [];
   let index = 1;
   const add = (category, text, basis, sourceIds = []) => {
@@ -1053,6 +1358,40 @@ function buildSourceClaims(brief, mapSignals, trendSignals, broadcastSignals, co
       "文明统计指标的分层结果",
       [`CIV-${profile.civ}`],
     );
+  }
+  for (const war of politicalOverview?.declaredWars || []) {
+    add(
+      "政治概览",
+      `${war.civA}与${war.civB}处于正式战争状态。`,
+      [
+        "Unciv 政治概览/外交状态；diplomaticStatus 缺省按 Unciv 默认 War 处理",
+        ...(war.basis || []),
+      ].join("；"),
+      [`DIP-WAR-${war.civA}-${war.civB}`],
+    );
+  }
+  for (const friend of politicalOverview?.formalFriendships || []) {
+    add(
+      "政治概览",
+      `${friend.civA}与${friend.civB}存在正式友好宣言。`,
+      "外交 flagsCountdown.DeclarationOfFriendship",
+      [`DIP-FRIEND-${friend.civA}-${friend.civB}`],
+    );
+  }
+  for (const wonder of culturalSignals.wonders || []) {
+    for (const text of wonder.publicSignals || []) {
+      add("奇观格局", text, "城市 builtBuildings 与文明 naturalWonders 的脱敏整理", [wonder.id]);
+    }
+  }
+  for (const religion of culturalSignals.religions || []) {
+    for (const text of religion.publicSignals || []) {
+      add("宗教格局", text, "全局 religions、文明 religionManager 与城市宗教字段整理", [religion.id]);
+    }
+  }
+  for (const policy of culturalSignals.policies || []) {
+    for (const text of policy.publicSignals || []) {
+      add("政策口径", text, "文明 adoptedPolicies 的制度取向整理", [policy.id]);
+    }
   }
   for (const signal of mapSignals) {
     for (const text of signal.publicSignals || []) {
@@ -1093,6 +1432,46 @@ async function readRulesetJson(baseRuleset, fileName) {
     }
   }
   return null;
+}
+
+async function readJsonFileIfPresent(file) {
+  try {
+    return JSON.parse(stripJsonComments(await fs.readFile(file, "utf8")));
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+async function readModRulesetJsons(game, fileName) {
+  const results = [];
+  for (const mod of game.gameParameters?.mods || []) {
+    const candidates = [
+      path.join("D:", "Program", "Unciv", "mods", mod, "jsons", fileName),
+      path.join(WORKSPACE_DIR, "Unciv", "mods", mod, "jsons", fileName),
+    ];
+    for (const file of candidates) {
+      const parsed = await readJsonFileIfPresent(file);
+      if (parsed) {
+        results.push(parsed);
+        break;
+      }
+    }
+  }
+  return results;
+}
+
+async function buildingCatalog(game) {
+  const catalog = new Map();
+  const addAll = (buildings) => {
+    for (const building of buildings || []) {
+      if (building?.name) catalog.set(building.name, { ...(catalog.get(building.name) || {}), ...building });
+    }
+  };
+
+  addAll(await readRulesetJson(baseRulesetName(game), "Buildings.json"));
+  for (const modBuildings of await readModRulesetJsons(game, "Buildings.json")) addAll(modBuildings);
+  return catalog;
 }
 
 function speedYearFromRows(turn, speed) {
@@ -1175,17 +1554,28 @@ function resolveOutputPaths(args, game, brief) {
   return args;
 }
 
-function buildExpertPanels(metrics, wars, trades, conflictTheaters = []) {
+function buildExpertPanels(metrics, wars, trades, conflictTheaters = [], politicalOverview = null, culturalSignals = {}) {
   const scoreLeader = rank(metrics, "score").at(0);
   const forceLeader = rank(metrics, "force").at(0);
   const weakest = rank(metrics, "score").at(-1);
   const cityLeader = rank(metrics, "cities").at(0);
   const cultureLeader = rank(metrics, "culture").at(0);
+  const wonderLeader = [...(culturalSignals.wonders || [])].sort(
+    (a, b) => (b.wonders.length + b.naturalWonders.length) - (a.wonders.length + a.naturalWonders.length),
+  ).at(0);
+  const matureReligions = (culturalSignals.religions || []).filter((record) => /强化|创立/.test(record.state));
+  const broadPolicy = (culturalSignals.policies || []).at(0);
 
   return {
     politicalAnalyst: [
       scoreLeader ? `${scoreLeader.displayName}的国际声望处在高位，可被包装为“元老院信心指数充足”。` : "",
       weakest ? `${weakest.displayName}的国势偏弱，适合悼文、病危通知或“史馆预案”。` : "",
+      politicalOverview?.declaredWars?.length
+        ? `政治概览确认的宣战关系：${politicalOverview.declaredWars.map((war) => war.text).join("；")}。`
+        : "",
+      politicalOverview?.formalFriendships?.length
+        ? `正式友好关系：${politicalOverview.formalFriendships.map((item) => item.text).join("；")}。注意友好不等于没有战争风险。`
+        : "",
       conflictTheaters.length
         ? `主要战区线索：${conflictTheaters.map((theater) => `${theater.civs.join("—")}（${theater.status}）`).join("；")}。`
         : wars.length
@@ -1198,8 +1588,13 @@ function buildExpertPanels(metrics, wars, trades, conflictTheaters = []) {
     ].filter(Boolean),
     culturalAnalyst: [
       cultureLeader ? `${cultureLeader.displayName}文化声量较高，可适合作为副刊素材。` : "",
+      wonderLeader ? `${wonderLeader.civ}的奇观素材较醒目，可写成宫廷美术、朝圣路线或世界遗产争鸣。` : "",
+      matureReligions.length
+        ? `宗教专栏可参考：${matureReligions.map((record) => `${record.civ}（${record.state}）`).join("；")}。`
+        : "",
+      broadPolicy ? `${broadPolicy.posture}取向覆盖面较广，可写成“各国议会共同抄作业”。` : "",
       "世界广播、宗教与奇观消息可写成文明自信或祭司宣传。",
-    ],
+    ].filter(Boolean),
     militaryAnalyst: [
       forceLeader ? `${forceLeader.displayName}军势最醒目，但禁止写具体部队、部署、路线。` : "",
       conflictTheaters[0] ? `本期最值得战地通讯解释的是${conflictTheaters[0].civs.join("—")}战区，但只能写力量对比、夺城旧账和地形趋势。` : "",
@@ -1215,7 +1610,8 @@ async function buildBrief(game) {
   const scoreLeader = rank(metrics, "score").at(0);
   const forceLeader = rank(metrics, "force").at(0);
   const weakest = rank(metrics, "score").at(-1);
-  const wars = activeWars(game);
+  const politicalOverview = diplomaticRelationRecords(game);
+  const wars = politicalOverview.declaredWars.map((war) => war.text);
   const trades = activeTrades(game);
   const captures = cityCaptureRecords(game);
   for (const capture of captures) {
@@ -1223,7 +1619,7 @@ async function buildBrief(game) {
       capture.year = (await gameYear({ ...game, turns: capture.turn })).label;
     }
   }
-  const conflictTheaters = buildConflictTheaters(game, metrics, captures);
+  const conflictTheaters = buildConflictTheaters(game, metrics, captures, politicalOverview.declaredWars);
   const events = publicEvents(game);
   for (const event of events) {
     if (event.turn != null) {
@@ -1235,6 +1631,12 @@ async function buildBrief(game) {
   const mapSignals = mapPressureSignals(game);
   const trendSignals = productionResearchCultureSignals(game);
   const broadcastSignals = wonderCultureScienceSignals(events);
+  const catalog = await buildingCatalog(game);
+  const culturalSignals = {
+    wonders: worldWonderRecords(game, catalog),
+    religions: religionLandscapeRecords(game),
+    policies: policyPostureRecords(game),
+  };
 
   const preferredColumns = [];
   preferredColumns.push("头版社论");
@@ -1245,7 +1647,8 @@ async function buildBrief(game) {
     preferredColumns.push("讣告与悼文");
   }
   if (conflictTheaters.length) preferredColumns.push("战地通讯");
-  if (events.some((event) => event.kind === "全球广播")) preferredColumns.push("科学与奇观");
+  if (events.some((event) => event.kind === "全球广播") || culturalSignals.wonders.length) preferredColumns.push("科学与奇观");
+  if (culturalSignals.religions.length || culturalSignals.policies.length) preferredColumns.push("文化副刊");
   preferredColumns.push("独家密电");
   preferredColumns.push("市井版");
 
@@ -1256,7 +1659,7 @@ async function buildBrief(game) {
     scoreLeader ? `${scoreLeader.displayName}声势居前，可以写霸权观察、元老院信心或天命叙事。` : "",
     forceLeader ? `${forceLeader.displayName}武备醒目，但公开稿不能给战术细节。` : "",
     conflictTheaters.length
-      ? `本期真正值得解释的战区线索：${conflictTheaters.map((theater) => `${theater.civs.join("—")}（${theater.status}）`).join("；")}。`
+      ? `本期真正值得解释的战争线索：${conflictTheaters.map((theater) => `${theater.civs.join("—")}（${theater.status}）`).join("；")}。`
       : wars.length
         ? `有公开战争素材：${wars.join("；")}。`
         : "没有适合头版的全面战争，可写“和平时期的不和平现象”。",
@@ -1292,6 +1695,30 @@ async function buildBrief(game) {
       })),
     worldBroadcastDigest: broadcastSignals,
     conflictTheaters,
+    wonderLedger: culturalSignals.wonders.map((record) => ({
+      id: record.id,
+      civ: record.civ,
+      wonders: record.wonders.map((wonder) => wonder.name),
+      naturalWonders: record.naturalWonders.map((wonder) => wonder.name),
+      publicSignals: record.publicSignals,
+    })),
+    religionLandscape: culturalSignals.religions.map((record) => ({
+      id: record.id,
+      civ: record.civ,
+      state: record.state,
+      foundedReligions: record.foundedReligions
+        .filter((religion) => religion.fullReligion)
+        .map((religion) => religion.name),
+      holyReligions: record.holyReligions,
+      publicSignals: record.publicSignals,
+    })),
+    policyPosture: culturalSignals.policies.map((record) => ({
+      id: record.id,
+      posture: record.posture,
+      civs: record.civs,
+      completedBy: record.completedBy,
+      publicSignals: record.publicSignals,
+    })),
     capturedCityLedger: captures
       .filter((capture) => capture.isMajorOriginalOwner)
       .map((capture) => ({
@@ -1303,13 +1730,20 @@ async function buildBrief(game) {
       })),
   };
 
-  const sourceClaims = buildSourceClaims({ civProfiles: profiles }, mapSignals, trendSignals, broadcastSignals, conflictTheaters);
+  const sourceClaims = buildSourceClaims(
+    { civProfiles: profiles },
+    mapSignals,
+    trendSignals,
+    broadcastSignals,
+    conflictTheaters,
+    politicalOverview,
+    culturalSignals,
+  );
 
   return {
     dateline: {
       year: year.label,
       speed: year.speedName,
-      currentPlayer: displayCiv(game.currentPlayer || "未知文明"),
     },
     newspaper: {
       name: "看海日报",
@@ -1328,10 +1762,31 @@ async function buildBrief(game) {
     civProfiles: profiles,
     publicEvents: events,
     strategicSignals,
+    politicalOverview: {
+      declaredWars: politicalOverview.declaredWars.map((war) => ({
+        civs: [war.civA, war.civB],
+        scope: war.scope,
+        text: `${war.civA}与${war.civB}处于正式战争状态`,
+        basis: war.basis,
+      })),
+      formalFriendships: politicalOverview.formalFriendships.map((item) => ({
+        civs: [item.civA, item.civB],
+        text: item.text,
+      })),
+      protectorates: politicalOverview.protectorates.map((item) => ({
+        civs: [item.civA, item.civB],
+        text: item.text,
+      })),
+      warmRelations: politicalOverview.warmRelations.map((item) => ({
+        civs: [item.civA, item.civB],
+        text: item.text,
+      })),
+      note: "友好、保护和贸易关系不等于没有宣战；宣战关系以 declaredWars 为准。",
+    },
     sourceClaims,
     mildlySensitiveIntel: {
       allowedUse: "只能作为独家消息的氛围材料，最多写趋势，不写精确数值。",
-      expertPanels: buildExpertPanels(metrics, wars, trades, conflictTheaters),
+      expertPanels: buildExpertPanels(metrics, wars, trades, conflictTheaters, politicalOverview, culturalSignals),
     },
     redactionPolicy: [
       "报纸中的具体事实必须能回溯到 publicEvents、strategicSignals 或 sourceClaims；不能凭空编造具体战果、工程、条约、奇观或文明关系。",
@@ -1339,6 +1794,7 @@ async function buildBrief(game) {
       "禁止坐标、地图路线、精确兵力、单位部署、城市防御细节。",
       "禁止精确金币、科研、文化、产能、科技清单、建造队列等可直接辅助决策的信息。",
       "允许用宽泛词：高位、中游、低迷、军势醒目、边境不宁、商路活跃、文化声量较高。",
+      "允许写已完成的奇观、宗教旗号和政策取向，但不要写当前建造队列或未公开科技清单。",
       "独家密电可以略微涉密，但必须文学化、模糊化，不得成为参谋简报。",
     ],
   };
@@ -1397,7 +1853,7 @@ function metricWithRank(item, ranked, key) {
 function panelSourceHint(panelName) {
   if (panelName === "politicalAnalyst") return "文明国势、公开战争状态";
   if (panelName === "economicAnalyst") return "城市数量、外交贸易记录";
-  if (panelName === "culturalAnalyst") return "文化统计、全球广播与奇观消息";
+  if (panelName === "culturalAnalyst") return "文化统计、全球广播、奇观、宗教与政策取向";
   if (panelName === "militaryAnalyst") return "军力统计、战争/蛮族类通知";
   return "brief 中的综合素材";
 }
@@ -1431,6 +1887,12 @@ async function buildEvidenceReport(game, brief, args, sourcePack) {
   const eventRecords = publicEventRecords(game);
   const mapSignals = mapPressureSignals(game);
   const trendSignals = productionResearchCultureSignals(game);
+  const catalog = await buildingCatalog(game);
+  const culturalSignals = {
+    wonders: worldWonderRecords(game, catalog),
+    religions: religionLandscapeRecords(game),
+    policies: policyPostureRecords(game),
+  };
   const captureRecords = cityCaptureRecords(game);
   for (const capture of captureRecords) {
     if (capture.turn != null) capture.year = await eventYearLabel(game, capture.turn);
@@ -1445,7 +1907,7 @@ async function buildEvidenceReport(game, brief, args, sourcePack) {
     ["数据来源", args.source === "remote" ? "联机服务器只读下载" : "本地存档", sourceLabel],
     ["存档游戏 ID", game.gameId || args.gameId || "未知", "game.gameId / --game-id"],
     ["Unciv 版本", gameVersionText(game), "game.version.createdWith.text"],
-    ["当前进度", `${brief.dateline.year}，当前行动文明：${brief.dateline.currentPlayer}`, `game.turns=${game.turns}`],
+    ["当前进度", brief.dateline.year, `game.turns=${game.turns}`],
     ["规则与速度", `${baseRulesetName(game)} / ${speedName(game)}`, "game.gameParameters（缺省时使用 Unciv 默认值）"],
     ["难度", game.gameParameters?.difficulty || game.difficulty || "未知", "game.gameParameters.difficulty"],
     ["模组", game.gameParameters?.mods?.join("、") || "无", "game.gameParameters.mods"],
@@ -1458,6 +1920,9 @@ async function buildEvidenceReport(game, brief, args, sourcePack) {
     ["地图趋势数", brief.strategicSignals?.mapPressure?.length ?? 0, "`brief.strategicSignals.mapPressure`"],
     ["内政趋势数", brief.strategicSignals?.domesticTrends?.length ?? 0, "`brief.strategicSignals.domesticTrends`"],
     ["战区态势数", brief.strategicSignals?.conflictTheaters?.length ?? 0, "`brief.strategicSignals.conflictTheaters`"],
+    ["奇观记录数", brief.strategicSignals?.wonderLedger?.length ?? 0, "`brief.strategicSignals.wonderLedger`"],
+    ["宗教记录数", brief.strategicSignals?.religionLandscape?.length ?? 0, "`brief.strategicSignals.religionLandscape`"],
+    ["政策取向数", brief.strategicSignals?.policyPosture?.length ?? 0, "`brief.strategicSignals.policyPosture`"],
     ["夺城记录数", brief.strategicSignals?.capturedCityLedger?.length ?? 0, "`brief.strategicSignals.capturedCityLedger`"],
     ["sourceClaims 数", brief.sourceClaims?.length ?? 0, "`brief.sourceClaims`"],
   ];
@@ -1484,8 +1949,25 @@ async function buildEvidenceReport(game, brief, args, sourcePack) {
       `WAR-${String(index + 1).padStart(2, "0")}`,
       "战争状态",
       `${war.civA} vs ${war.civB}`,
-      `diplomacy.diplomaticStatus = ${war.status}`,
-      `brief/专家面板中写作：公开战争线索：${war.text}`,
+      [
+        `政治概览显示 At war；存档 diplomaticStatus 为 ${war.status}（缺省值按 Unciv 默认 War 处理）`,
+        ...(war.basis || []),
+      ].join("；"),
+      `正式宣战关系：${war.civA}与${war.civB}处于战争状态`,
+    ]),
+    ...diplomaticRelationRecords(game).formalFriendships.map((friend, index) => [
+      `FRIEND-${String(index + 1).padStart(2, "0")}`,
+      "友好宣言",
+      `${friend.civA} 与 ${friend.civB}`,
+      `flagsCountdown.DeclarationOfFriendship 剩余 ${friend.turnsLeft} 回合`,
+      `${friend.text}；友好不代表不会宣战。`,
+    ]),
+    ...diplomaticRelationRecords(game).protectorates.map((item, index) => [
+      `PROTECT-${String(index + 1).padStart(2, "0")}`,
+      "城邦保护",
+      `${item.civA} 与 ${item.civB}`,
+      "diplomaticStatus = Protector",
+      item.text,
     ]),
     ...tradeRecords.map((trade, index) => [
       `DIP-${String(index + 1).padStart(2, "0")}`,
@@ -1557,6 +2039,33 @@ async function buildEvidenceReport(game, brief, args, sourcePack) {
     signal.publicSignals.join("；") || "无显著公开写作信号",
   ]);
 
+  const wonderRows = culturalSignals.wonders.map((record) => [
+    record.id,
+    record.civ,
+    record.wonders.map((wonder) => `${wonder.name}${wonder.capital ? "（首都）" : ""}`).join("、") || "无",
+    record.wonders.map((wonder) => `${wonder.rawName}@${wonder.city}`).join("；") || "无",
+    record.naturalWonders.map((wonder) => wonder.name).join("、") || "无",
+    record.publicSignals.join("；"),
+  ]);
+
+  const religionRows = culturalSignals.religions.map((record) => [
+    record.id,
+    record.civ,
+    record.state,
+    record.foundedReligions.map((religion) => religion.name).join("、") || "无",
+    record.holyReligions.join("、") || "无",
+    record.topPressure.join("、") || "无",
+    record.publicSignals.join("；"),
+  ]);
+
+  const policyRows = culturalSignals.policies.map((record) => [
+    record.id,
+    record.posture,
+    record.civs.join("、"),
+    record.completedBy.join("、") || "无完整树记录",
+    record.publicSignals.join("；"),
+  ]);
+
   const panelRows = [];
   for (const [panelName, lines] of Object.entries(brief.mildlySensitiveIntel?.expertPanels || {})) {
     for (const [index, line] of lines.entries()) {
@@ -1600,8 +2109,14 @@ ${JSON.stringify(
     strategicSignalCount:
       (sourcePack.brief.strategicSignals?.mapPressure?.length ?? 0) +
       (sourcePack.brief.strategicSignals?.domesticTrends?.length ?? 0) +
-      (sourcePack.brief.strategicSignals?.conflictTheaters?.length ?? 0),
+      (sourcePack.brief.strategicSignals?.conflictTheaters?.length ?? 0) +
+      (sourcePack.brief.strategicSignals?.wonderLedger?.length ?? 0) +
+      (sourcePack.brief.strategicSignals?.religionLandscape?.length ?? 0) +
+      (sourcePack.brief.strategicSignals?.policyPosture?.length ?? 0),
     conflictTheaterCount: sourcePack.brief.strategicSignals?.conflictTheaters?.length ?? 0,
+    wonderRecordCount: sourcePack.brief.strategicSignals?.wonderLedger?.length ?? 0,
+    religionRecordCount: sourcePack.brief.strategicSignals?.religionLandscape?.length ?? 0,
+    policyPostureCount: sourcePack.brief.strategicSignals?.policyPosture?.length ?? 0,
     capturedCityCount: sourcePack.brief.strategicSignals?.capturedCityLedger?.length ?? 0,
   },
   null,
@@ -1657,27 +2172,40 @@ ${markdownTable(
   ["ID", "文明", "窗口", "军备", "产能", "科研", "文化", "财政", "进入 brief 的写法"],
   trendRows,
 )}
-## 十、近期通知核对
+## 十、奇观、宗教与政策取向核对
+
+这些记录来自已建建筑、自然奇观、全局宗教表、城市圣城字段和文明政策表。它们适合写文化副刊、政治观察和独家密电，但不包含当前建造队列。
+
+${markdownTable(
+  ["ID", "文明", "已完成世界奇观", "真实奇观归属", "自然奇观", "进入 brief 的写法"],
+  wonderRows,
+)}
+${markdownTable(
+  ["ID", "文明", "宗教阶段", "创立/信仰旗号", "圣城素材", "境内主要宗教压力", "进入 brief 的写法"],
+  religionRows,
+)}
+${markdownTable(["ID", "取向", "涉及文明", "完整制度叙事", "进入 brief 的写法"], policyRows)}
+## 十一、近期通知核对
 
 这些记录来自各文明 \`notificationsLog\` 中最近若干回合、且被程序判定为适合进入报纸素材池的通知。左侧是真实通知文本，右侧是进入 brief 前的降敏写法。
 
 ${markdownTable(["ID", "时间", "来源文明", "类别", "真实通知文本", "进入 brief 的写法"], eventRows)}
-## 十一、sourceClaims 核对
+## 十二、sourceClaims 核对
 
 这些是 LLM 最应该依赖的事实陈述。报纸里的具体事实如果离开这些 sourceClaims，就应该视为模型发挥。
 
 ${markdownTable(["ID", "类别", "可用事实", "依据", "来源 ID"], claimRows)}
-## 十二、专家面板来源
+## 十三、专家面板来源
 
 这些内容会进入 \`mildlySensitiveIntel.expertPanels\`，供“独家密电”栏目使用。它们允许略微涉密，但仍应写成趋势、传闻和隐喻。
 
 ${markdownTable(["ID", "brief 中的专家素材", "主要依据"], panelRows)}
-## 十三、核稿办法
+## 十四、核稿办法
 
 1. 报纸中关于强国、弱国、霸权气氛的判断，优先核对“四、文明指标与报纸标签”。
 2. 报纸中关于战争、夺城、战况、前线态势、地形的内容，优先核对“六、夺城与城市易手台账”和“七、战区态势核对”。
-3. 报纸中关于边境压力、蛮族活动、前线交火的内容，优先核对“八、地图趋势核对”和“十、近期通知核对”。
-4. 报纸中关于奇观、时代变化、科研、城市发展、市政工程的内容，优先核对“九、军备、科研、文化与财政趋势”和“十、近期通知核对”。
+3. 报纸中关于边境压力、蛮族活动、前线交火的内容，优先核对“八、地图趋势核对”和“十一、近期通知核对”。
+4. 报纸中关于奇观、宗教、政策取向、时代变化、科研、城市发展、市政工程的内容，优先核对“九、军备、科研、文化与财政趋势”“十、奇观、宗教与政策取向核对”和“十一、近期通知核对”。
 5. 报纸中如果出现找不到对应证据的具体事实，那就是 LLM 的文学发挥，发布前应人工改掉或删掉。
 `;
 }
@@ -1697,8 +2225,11 @@ async function buildPrompt(brief, args) {
 - 所有具体事实只能来自 brief.publicEvents、brief.strategicSignals、brief.sourceClaims 和 mildlySensitiveIntel.expertPanels；不要凭空增加具体战果、条约、工程、奇观、文明关系或城市状态。
 - brief.sourceClaims 是事实锚点；可以文学化改写，但不要在公开稿里输出 SRC 编号。
 - 不要写“来自某方向”“沿某路”“逼近某城”“某城附近”这类方向性或位置性暗示。
+- 不要在公开稿里出现 JSON 字段名或技术证据名，例如 diplomaticStatus、DeclaredWarOnUs、CapturedOurCities、sourceClaims、declaredWar 等。
+- wonderLedger、religionLandscape、policyPosture 只可写作已完成奇观、宗教旗号和制度取向；不要推测当前建造队列或未公开科技路线。
 - 版面不能固定化。栏目之间尽量主题正交，不要所有栏目都写同一个国家或同一件事。
 - 讣告与悼文是罕见栏目，只有失城、首都陷落、亡国边缘或 brief 明确强烈支持时才写。
+- 已宣战战争、城市易手、夺城旧账、战区力量对比的优先级高于财政或普通内政趋势。财政只能作为旁注。
 - 除纪年和报纸期号外，不要写任何看似精确的次数、数量、排名或清单。
 - 可以从固定栏目中选 2-4 个，但不要机械铺满所有栏目。
 - 正文全部由你撰写；不要输出 JSON，不要列数据表。
