@@ -181,8 +181,8 @@ function chooseLayout(issue) {
   const score = length + restSections * 120;
   let bodyColumns = 1;
   if (restSections >= 2) bodyColumns = 2;
-  if (restSections >= 4 && score > 1650) bodyColumns = 3;
-  if (restSections >= 3 && score > 2350) bodyColumns = 3;
+  if (restSections >= 5 && score > 2400) bodyColumns = 3;
+  if (restSections >= 6 && score > 2000) bodyColumns = 3;
   const leadColumns = leadWeight < 260 || bodyColumns === 1 ? 1 : Math.min(bodyColumns, leadWeight > 520 ? 3 : 2);
   if (score < 1150) {
     return { name: "compact", maxWidth: bodyColumns > 1 ? 820 : 700, leadColumns, bodyColumns, score };
@@ -235,6 +235,7 @@ function balanceBlocks(blocks, columnCount) {
 
 function makeFillerSections(issue, layout = chooseLayout(issue), restSections = issueSections(issue).slice(1)) {
   if (layout.bodyColumns <= 1 || !restSections.length) return [];
+  if (restSections.length >= layout.bodyColumns && restSections.length % layout.bodyColumns === 0) return [];
   const weights = balanceSections(restSections, layout.bodyColumns)
     .map((sections) => sections.reduce((sum, section) => sum + sectionWeight(section), 0));
   const tallest = Math.max(...weights, 0);
