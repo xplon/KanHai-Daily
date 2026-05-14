@@ -29,19 +29,31 @@ ANTHROPIC_BASE_URL=
 ANTHROPIC_MODEL=
 ```
 
+远程读取联机存档时，还需要提供游戏 ID。可以写在 `.env` 里，也可以运行时通过 `--game-id` 传入：
+
+```env
+KANHAI_GAME_ID=
+```
+
 可选：
 
 ```env
 KANHAI_TEMPERATURE=0.75
-KANHAI_MAX_TOKENS=1800
+KANHAI_MAX_TOKENS=2200
 ```
 
 ## 生成报纸
 
 ```powershell
 node .\kanhai-daily\scripts\kanhai-paper.mjs `
-  --game-id 2ec21879-b28b-4ea4-89f8-aafb87d6e532 `
+  --game-id <你的游戏ID> `
   --server https://uncivserver.xyz
+```
+
+如果已经在 `.env` 中设置了 `KANHAI_GAME_ID`，也可以省略 `--game-id`：
+
+```powershell
+node .\kanhai-daily\scripts\kanhai-paper.mjs --server https://uncivserver.xyz
 ```
 
 默认输出到类似这样的当期目录，避免覆盖旧报纸：
@@ -64,7 +76,7 @@ kanhai-daily/reports/runs/T081_公元230年_20260513-195733/
 只生成脱敏素材和提示词，不调用 LLM：
 
 ```powershell
-node .\kanhai-daily\scripts\kanhai-paper.mjs --no-llm
+node .\kanhai-daily\scripts\kanhai-paper.mjs --game-id <你的游戏ID> --no-llm
 ```
 
 指定写作倾向：
@@ -77,7 +89,7 @@ node .\kanhai-daily\scripts\kanhai-paper.mjs --style 独家消息
 
 ## 栏目设计
 
-脚本会把这些栏目作为选项交给 LLM，LLM 每期自行选择合适的 2-4 个：
+脚本会把这些栏目作为选项交给 LLM。默认版式是 `1+4`：1 个头版 + 4 个其他版面，共 5 个版面；头版一般使用“头版社论”，其他四版由 LLM 根据当期素材自行选择：
 
 - 头版社论
 - 战地通讯
@@ -92,7 +104,7 @@ node .\kanhai-daily\scripts\kanhai-paper.mjs --style 独家消息
 
 “独家密电”允许轻微涉密，但只能写趋势、传闻、隐喻和专家口吻，不能写成战术简报。
 
-版面不会固定套模板。脚本会把版面约束写进 brief：每期栏目之间尽量主题正交，不要所有栏目都围绕同一个国家或同一件事；`讣告与悼文` 是罕见强触发栏目，只有失城、首都陷落、亡国边缘或局势强烈支持时才建议使用。
+版面不会固定套文章内容，但会固定默认数量。脚本会把版面约束写进 brief：默认生成 1 个头版社论和 4 个其他自然栏目，但正文仍沿用当前 Markdown 报纸格式，不新增方括号版号、页码式版号或其他显式版面标记，也不改变现有栏目标题和分隔线风格；栏目之间尽量主题正交，不要所有栏目都围绕同一个国家或同一件事；`讣告与悼文` 是罕见强触发栏目，只有失城、首都陷落、亡国边缘或局势强烈支持时才建议使用。
 
 ## 泄密边界
 

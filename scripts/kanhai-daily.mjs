@@ -8,11 +8,12 @@ import zlib from "node:zlib";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
-const DEFAULT_GAME_ID = "2ec21879-b28b-4ea4-89f8-aafb87d6e532";
 const DEFAULT_SERVER = "https://uncivserver.xyz";
 const DEFAULT_LOCAL_SAVE = "D:/Program/Unciv/SaveFiles/Autosave";
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_DIR = path.resolve(SCRIPT_DIR, "..");
+const WORKSPACE_DIR = path.resolve(PROJECT_DIR, "..");
+const LEGACY_ENV_PREFIX = "KANG" + "HAI";
 
 const rankingKeys = {
   S: "score",
@@ -43,7 +44,7 @@ const rankingLabels = {
 function parseArgs(argv) {
   const args = {
     source: "remote",
-    gameId: DEFAULT_GAME_ID,
+    gameId: process.env.KANHAI_GAME_ID || process.env[`${LEGACY_ENV_PREFIX}_GAME_ID`] || "",
     server: DEFAULT_SERVER,
     local: DEFAULT_LOCAL_SAVE,
     out: path.join(PROJECT_DIR, "reports", "latest.md"),
@@ -79,6 +80,9 @@ function parseArgs(argv) {
   if (!Number.isFinite(args.maxEvents) || args.maxEvents < 1) {
     throw new Error("--max-events must be a positive number");
   }
+  if (args.source === "remote" && !args.gameId) {
+    throw new Error("Remote source requires --game-id or KANHAI_GAME_ID in kanhai-daily/.env.");
+  }
 
   return args;
 }
@@ -89,13 +93,32 @@ function printHelp() {
 
 Options:
   --source remote|local      Data source, defaults to remote
-  --game-id <uuid>           Unciv multiplayer game id
+  --game-id <uuid>           Unciv multiplayer game id, required for --source remote unless KANHAI_GAME_ID is set
   --server <url>             Unciv multiplayer server, defaults to https://uncivserver.xyz
   --local <path>             Local save path for --source local
   --out <path>               Markdown report output path
   --snapshot-dir <path>      Snapshot root for diffing future reports
   --max-events <number>      Max recent events in report, defaults to 24
   --no-snapshot              Do not write full GameInfo snapshots`);
+}
+
+async function loadDotenvIfPresent(file) {
+  try {
+    const text = await fs.readFile(file, "utf8");
+    for (const rawLine of text.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#") || !line.includes("=")) continue;
+      const [key, ...rest] = line.split("=");
+      if (!process.env[key]) process.env[key] = rest.join("=").trim();
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+}
+
+async function loadEnvironment() {
+  await loadDotenvIfPresent(path.join(WORKSPACE_DIR, ".env"));
+  await loadDotenvIfPresent(path.join(PROJECT_DIR, ".env"));
 }
 
 function fetchText(url, redirectCount = 0) {
@@ -176,8 +199,12 @@ async function readPreviousSnapshot(snapshotDir, gameId, currentHash) {
   }
 }
 
-async function writeSnapshot(snapshotDir, game, currentHash) {
-  const gameId = game.gameId || DEFAULT_GAME_ID;
+function snapshotGameId(game, args) {
+  return game.gameId || args.gameId || "local-save";
+}
+
+async function writeSnapshot(snapshotDir, game, currentHash, args) {
+  const gameId = snapshotGameId(game, args);
   const dir = path.join(snapshotDir, gameId);
   await fs.mkdir(dir, { recursive: true });
 
@@ -549,7 +576,7 @@ function formatReport({ game, previous, sourceLabel, args }) {
   lines.push("");
 
   lines.push("## 元信息");
-  lines.push(`- Game ID: ${game.gameId}`);
+  lines.push(`- Game ID: ${game.gameId || args.gameId || "local-save"}`);
   lines.push(`- Mods: ${mods.length ? mods.join(", ") : "无"}`);
   lines.push(`- 完整地图 tile 数：${getTiles(game).length}`);
   lines.push("");
@@ -558,11 +585,12 @@ function formatReport({ game, previous, sourceLabel, args }) {
 }
 
 async function main() {
+  await loadEnvironment();
   const args = parseArgs(process.argv.slice(2));
   const { game, sourceLabel } = await loadGame(args);
   const currentHash = hashGame(game);
-  const previous = args.snapshot ? await readPreviousSnapshot(args.snapshotDir, game.gameId || args.gameId, currentHash) : null;
-  if (args.snapshot) await writeSnapshot(args.snapshotDir, game, currentHash);
+  const previous = args.snapshot ? await readPreviousSnapshot(args.snapshotDir, snapshotGameId(game, args), currentHash) : null;
+  if (args.snapshot) await writeSnapshot(args.snapshotDir, game, currentHash, args);
 
   const report = formatReport({ game, previous, sourceLabel, args });
   await fs.mkdir(path.dirname(args.out), { recursive: true });

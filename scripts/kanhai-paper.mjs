@@ -7,7 +7,6 @@ import https from "node:https";
 import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
 
-const DEFAULT_GAME_ID = "2ec21879-b28b-4ea4-89f8-aafb87d6e532";
 const DEFAULT_SERVER = "https://uncivserver.xyz";
 const DEFAULT_LOCAL_SAVE = "D:/Program/Unciv/SaveFiles/Autosave";
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -170,7 +169,7 @@ const COLUMN_DECK = [
 function parseArgs(argv) {
   const args = {
     source: "remote",
-    gameId: DEFAULT_GAME_ID,
+    gameId: process.env.KANHAI_GAME_ID || process.env[`${LEGACY_ENV_PREFIX}_GAME_ID`] || "",
     server: DEFAULT_SERVER,
     local: DEFAULT_LOCAL_SAVE,
     out: null,
@@ -184,7 +183,7 @@ function parseArgs(argv) {
     timelineOut: path.join(PROJECT_DIR, "reports", "timeline.md"),
     timelineJsonOut: path.join(PROJECT_DIR, "reports", "timeline.json"),
     style: "auto",
-    maxTokens: Number(process.env.KANHAI_MAX_TOKENS || process.env[`${LEGACY_ENV_PREFIX}_MAX_TOKENS`] || 1800),
+    maxTokens: Number(process.env.KANHAI_MAX_TOKENS || process.env[`${LEGACY_ENV_PREFIX}_MAX_TOKENS`] || 2200),
     temperature: Number(process.env.KANHAI_TEMPERATURE || process.env[`${LEGACY_ENV_PREFIX}_TEMPERATURE`] || 0.9),
     noLlm: false,
     noFactCheck: false,
@@ -233,6 +232,9 @@ function parseArgs(argv) {
   if (!Number.isFinite(args.temperature) || args.temperature < 0 || args.temperature > 2) {
     throw new Error("--temperature must be between 0 and 2");
   }
+  if (args.source === "remote" && !args.gameId) {
+    throw new Error("Remote source requires --game-id or KANHAI_GAME_ID in kanhai-daily/.env.");
+  }
   return args;
 }
 
@@ -242,7 +244,7 @@ function printHelp() {
 
 Options:
   --source remote|local      Data source, defaults to remote
-  --game-id <uuid>           Unciv multiplayer game id
+  --game-id <uuid>           Unciv multiplayer game id, required for --source remote unless KANHAI_GAME_ID is set
   --server <url>             Unciv multiplayer server
   --local <path>             Local save path for --source local
   --out <path>               LLM newspaper output path
@@ -1669,11 +1671,25 @@ async function buildBrief(game) {
     preferredColumns.push("讣告与悼文");
   }
   if (conflictTheaters.length) preferredColumns.push("战地通讯");
+  if (
+    politicalOverview.declaredWars.length ||
+    politicalOverview.formalFriendships.length ||
+    politicalOverview.protectorates.length
+  ) {
+    preferredColumns.push("政治观察");
+  }
   if (events.some((event) => event.kind === "全球广播") || culturalSignals.wonders.length) preferredColumns.push("科学与奇观");
   preferredColumns.push("独家密电");
+  if (trendSignals.some((signal) => signal.publicSignals.length) || trades.length) preferredColumns.push("经济风向");
   preferredColumns.push("市井版");
   if (!conflictTheaters.length && (culturalSignals.religions.length || culturalSignals.policies.length)) {
     preferredColumns.push("文化副刊");
+  }
+  const defaultFallbackColumns = ["政治观察", "独家密电", "文化副刊", "市井版", "科学与奇观", "经济风向", "史馆档案"];
+  const preferredEditionColumns = [];
+  for (const column of [...preferredColumns, ...defaultFallbackColumns]) {
+    if (!preferredEditionColumns.includes(column)) preferredEditionColumns.push(column);
+    if (preferredEditionColumns.length >= 5) break;
   }
 
   const editorialAngles = [
@@ -1687,6 +1703,7 @@ async function buildBrief(game) {
       : wars.length
         ? `有公开战争素材：${wars.join("；")}。`
         : "没有适合头版的全面战争，可写“和平时期的不和平现象”。",
+    "默认版式是“头版 + 四个其他版面”：头版负责本期社论判断，其余四版各自处理不同主题，方便前端按五块排版。",
     "版面要正交：每个栏目尽量处理不同主题或不同文明，不要所有栏目都围绕同一个国家、同一件事反复写。",
     "奇观、宗教、政策素材只做调味，不要写成全世界文化/宗教名录；战争与夺城旧账仍是头条骨架。",
     "保留旧报纸的短促讽刺感，结尾用“本报编辑部按”把局势收束成一段好笑但可靠的按语。",
@@ -1776,11 +1793,22 @@ async function buildBrief(game) {
     newspaper: {
       name: "看海日报",
       availableColumns: COLUMN_DECK,
-      preferredColumns: [...new Set(preferredColumns)].slice(0, 5),
+      preferredColumns: preferredEditionColumns,
+      layout: {
+        mode: "front_plus_four",
+        frontPageCount: 1,
+        otherPageCount: 4,
+        totalPages: 5,
+        visiblePageMarkers: false,
+        note: "只约束版面数量，不要求在正文中显示版号或特殊标记；成稿沿用自然栏目标题格式。",
+        frontPageColumn: "头版社论",
+      },
       requestedStyle:
-        "让 LLM 自行选择，偏假装正经的娱乐报纸。栏目不要固定化；讣告/悼文是罕见强触发栏目，不要因为有弱国就自动写。",
+        "让 LLM 自行选择，偏假装正经的娱乐报纸。默认写成 1+4 版式：头版社论 + 四个其他版面。具体栏目不要固定化；讣告/悼文是罕见强触发栏目，不要因为有弱国就自动写。",
       layoutPolicy: [
-        "每期任选 2-4 个栏目。",
+        "默认每期必须写 5 个版面：1 个头版 + 4 个其他版面。",
+        "头版一般使用“头版社论”，概括最重要的世界局势；其余四版从固定栏目中选择。",
+        "不要在正文中新增方括号版号、页码式版号或其他显式版面标记，也不要改变现有 Markdown 栏目标题和分隔线风格。",
         "栏目之间尽量主题正交：头版讲大战略，战地讲一个战区，经济讲另一个国家或贸易，文化/市井讲不同素材。",
         "不要所有栏目都围绕同一文明或同一事件。",
         "讣告与悼文只有在失城、亡国边缘、首都陷落或 sourceClaims 强烈支持时才写。",
@@ -2134,6 +2162,7 @@ ${markdownTable(["项目", "核对值", "说明"], sourcePackRows)}
 ${JSON.stringify(
   {
     dateline: sourcePack.brief.dateline,
+    layout: sourcePack.brief.newspaper?.layout,
     preferredColumns: sourcePack.brief.newspaper?.preferredColumns,
     sourceClaimCount: sourcePack.brief.sourceClaims?.length ?? 0,
     publicEventCount: sourcePack.brief.publicEvents?.length ?? 0,
@@ -2244,7 +2273,7 @@ ${markdownTable(["ID", "brief 中的专家素材", "主要依据"], panelRows)}
 async function buildPrompt(brief, args) {
   const templatePath = path.join(PROJECT_DIR, "prompts", "newspaper-writer.md");
   const template = await fs.readFile(templatePath, "utf8");
-  const styleHint = args.style === "auto" ? "由你根据素材选择最有梗的栏目组合。" : `本期倾向文体/栏目：${args.style}`;
+  const styleHint = args.style === "auto" ? "由你根据素材选择最有梗的 1+4 版面组合。" : `本期倾向文体/栏目：${args.style}`;
   return `${template}
 
 ---
@@ -2253,6 +2282,10 @@ async function buildPrompt(brief, args) {
 
 - ${styleHint}
 - 开头固定两行：第一行“看海日报”；第二行“${brief.dateline.year}·四个汉字副题”。副题由你拟，必须是四个汉字，不要写“四个汉字副题”这几个字。
+- 报头之后默认必须写成 1+4 版式：1 个头版 + 4 个其他版面，共 5 个自然栏目。
+- 不要在正文中新增方括号版号、页码式版号或其他显式版面标记，也不要改变当前 Markdown 栏目标题和分隔线风格；继续使用自然栏目标题，例如“头版社论：本版标题”“战地通讯：本版标题”“独家密电：本版标题”。
+- 其他四版必须从 brief.newspaper.availableColumns 或 preferredColumns 中选择合适栏目；如果素材不足，优先使用“独家密电”“政治观察”“文化副刊”“市井版”等可容纳评论和副刊梗的栏目补足。
+- 五个版面要尽量正交：头版总揽全局，其他四版分别写不同主题或不同文明，不要把同一场战争用五种标题重复一遍。
 - 结尾必须有“本报编辑部按：”，用 1-3 句诙谐总结当前局势。
 - 必须使用纪年：${brief.dateline.year}，不要写回合数。
 - 所有具体事实只能来自 brief.publicEvents、brief.strategicSignals、brief.sourceClaims 和 mildlySensitiveIntel.expertPanels；不要凭空增加具体战果、条约、工程、奇观、文明关系或城市状态。
@@ -2264,11 +2297,11 @@ async function buildPrompt(brief, args) {
 - 除非 brief 中的城市名、宗教自定义名或奇观名本来就是英文，否则不要夹英文；政策取向要写“荣誉”“自由”这类中文，不要写 honor、liberty。
 - wonderLedger、religionLandscape、policyPosture 只可写作已完成奇观、宗教旗号和制度取向；不要推测当前建造队列或未公开科技路线。
 - 奇观、宗教和政策素材只做调味，最多挑一两个最有梗的事实，不要写成文化名录。
-- 版面不能固定化。栏目之间尽量主题正交，不要所有栏目都写同一个国家或同一件事。
+- 版面不能固定化，但版式默认固定为 1+4。栏目之间尽量主题正交，不要所有栏目都写同一个国家或同一件事。
 - 讣告与悼文是罕见栏目，只有失城、首都陷落、亡国边缘或 brief 明确强烈支持时才写。
 - 已宣战战争、城市易手、夺城旧账、战区力量对比的优先级高于财政或普通内政趋势。财政只能作为旁注。
 - 除纪年和报纸期号外，不要写任何看似精确的次数、数量、排名或清单；用“多国”“部分国家”“若干”代替。
-- 可以从固定栏目中选 2-4 个，但不要机械铺满所有栏目。
+- 必须从固定栏目中组成 1+4 五个版面；不要机械罗列栏目名，每版都要有自己的标题和短小观点。
 - 正文全部由你撰写；不要输出 JSON，不要列数据表。
 
 下面是程序清洗后的脱敏 brief：
@@ -2515,8 +2548,8 @@ async function updateTimeline(game, brief, args) {
 }
 
 async function main() {
-  const args = parseArgs(process.argv.slice(2));
   await loadEnvironment();
+  const args = parseArgs(process.argv.slice(2));
   const game = await loadGame(args);
   const brief = await buildBrief(game);
   resolveOutputPaths(args, game, brief);
