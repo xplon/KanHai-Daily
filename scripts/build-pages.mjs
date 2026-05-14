@@ -6,6 +6,16 @@ import { fileURLToPath } from "node:url";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_DIR = path.resolve(SCRIPT_DIR, "..");
+const DEFAULT_SECTION_NAMES = [
+  "头版社论",
+  "战地通讯",
+  "独家密电",
+  "政治观察",
+  "经济纵横",
+  "文化副刊",
+  "市井版",
+  "讣告与悼文",
+];
 
 function parseArgs(argv) {
   const args = {
@@ -52,7 +62,7 @@ Options:
   --game-slug <slug>    Public game/session slug; defaults to the first 8 chars of the source game id
   --game-name <name>    Public game/session name; defaults to 对局 <hash>
   --editor-name <name>  Masthead byline/signature; defaults to a situational pen name
-  --include-run <name>  Only publish this reports/runs folder; repeat for multiple issues`);
+  --include-run <name>  Add/update this reports/runs folder and keep existing published issues; repeat for multiple issues`);
 }
 
 function stripInline(text) {
@@ -153,7 +163,18 @@ function findDateline(lines, brief, runInfo) {
   return runInfo.year || "";
 }
 
-function extractSectionHeading(rawLine) {
+function getKnownSectionNames(brief) {
+  const names = new Set(DEFAULT_SECTION_NAMES);
+  for (const column of brief?.newspaper?.availableColumns || []) {
+    if (column?.name) names.add(stripInline(column.name));
+  }
+  for (const column of brief?.newspaper?.preferredColumns || []) {
+    if (column) names.add(stripInline(column));
+  }
+  return names;
+}
+
+function extractSectionHeading(rawLine, knownSectionNames = new Set()) {
   const raw = rawLine.trim();
   const isMarkdownHeading = /^\s{0,3}#{1,6}\s+/.test(rawLine);
   const isBoldLine = /^\*\*[^*].*\*\*\s*$/.test(raw);
@@ -164,7 +185,11 @@ function extractSectionHeading(rawLine) {
     .replace(/\*\*$/, "")
     .trim();
   const bracketMatch = /^【([^】]+)】\s*(.*)$/.exec(line);
-  const colonMatch = isMarkdownHeading || isBoldLine ? /^([^：:\n]{2,18})[：:]\s*(.+)$/.exec(line) : null;
+  const colonCandidate = /^([^：:\n]{2,18})[：:]\s*(.+)$/.exec(line);
+  const colonSection = colonCandidate ? stripInline(colonCandidate[1]) : "";
+  const colonMatch = colonCandidate && (isMarkdownHeading || isBoldLine || knownSectionNames.has(colonSection))
+    ? colonCandidate
+    : null;
   const section = bracketMatch?.[1] || colonMatch?.[1] || "";
   const headlineText = bracketMatch?.[2] || colonMatch?.[2] || "";
   if (!section) return null;
@@ -263,6 +288,7 @@ function extractEditorNote(sections) {
 function parsePaper(markdown, brief, runInfo) {
   const normalized = normalizeMarkdown(markdown);
   const lines = normalized.split("\n");
+  const knownSectionNames = getKnownSectionNames(brief);
   const sections = [];
   let current = null;
   let prefaceLines = [];
@@ -285,7 +311,7 @@ function parsePaper(markdown, brief, runInfo) {
       continue;
     }
 
-    const heading = extractSectionHeading(rawLine);
+    const heading = extractSectionHeading(rawLine, knownSectionNames);
     const isMarkdownHeading = /^\s{0,3}#{1,6}\s+/.test(rawLine);
     const hasHeadlineAfterKicker = heading?.hasExplicitHeadline;
     const isSectionHeading = heading && (isMarkdownHeading || hasHeadlineAfterKicker || !current || afterDivider);
@@ -421,6 +447,25 @@ async function writeJson(file, value) {
   await fs.writeFile(file, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
+async function readExistingIssues(docsDir) {
+  const dir = path.join(docsDir, "data", "issues");
+  let entries = [];
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
+
+  const issues = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+    const issue = await readJsonIfPresent(path.join(dir, entry.name));
+    if (issue?.id && hasIssueBody(issue)) issues.push(issue);
+  }
+  return issues;
+}
+
 async function cleanGeneratedIssues(docsDir) {
   const dir = path.join(docsDir, "data", "issues");
   await fs.mkdir(dir, { recursive: true });
@@ -434,25 +479,48 @@ function hasIssueBody(issue) {
   return (issue.sections || []).some((section) => section.blocks?.length);
 }
 
+function compareIssues(a, b) {
+  const timeA = Date.parse(a.generatedAt || "");
+  const timeB = Date.parse(b.generatedAt || "");
+  if (Number.isFinite(timeA) && Number.isFinite(timeB) && timeA !== timeB) return timeA - timeB;
+  if ((a.turn ?? -1) !== (b.turn ?? -1)) return (a.turn ?? -1) - (b.turn ?? -1);
+  return String(a.id).localeCompare(String(b.id));
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const runs = await collectRuns(args.reportsDir);
   if (!runs.length) throw new Error(`No paper.md files found under ${path.join(args.reportsDir, "runs")}`);
   const selectedRuns = selectRuns(runs, args.includeRuns);
 
-  const issues = [];
+  const builtIssues = [];
   const skipped = [];
-  await cleanGeneratedIssues(args.docsDir);
   for (const run of selectedRuns) {
     const issue = await buildIssue(run, args);
     if (!hasIssueBody(issue)) {
       skipped.push(run.name);
       continue;
     }
-    issues.push(issue);
+    builtIssues.push(issue);
+  }
+  if (!builtIssues.length) {
+    const hint = skipped.length
+      ? ` Parsed but skipped run(s): ${skipped.join(", ")}. Check that paper.md uses article headings like "头版社论：标题".`
+      : "";
+    throw new Error(`No issues with article sections were found.${hint}`);
+  }
+
+  if (!args.includeRuns.length) await cleanGeneratedIssues(args.docsDir);
+  for (const issue of builtIssues) {
     await writeJson(path.join(args.docsDir, "data", "issues", `${issue.id}.json`), issue);
   }
-  if (!issues.length) throw new Error("No issues with article sections were found.");
+
+  const merged = new Map();
+  if (args.includeRuns.length) {
+    for (const issue of await readExistingIssues(args.docsDir)) merged.set(issue.id, issue);
+  }
+  for (const issue of builtIssues) merged.set(issue.id, issue);
+  const issues = [...merged.values()].sort(compareIssues);
 
   const games = [...issues.reduce((map, issue) => {
     const group = map.get(issue.gameId) || {

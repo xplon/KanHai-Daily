@@ -1,17 +1,27 @@
 {
   "schema": "kanhai-pages/v1",
-  "updatedAt": "2026-05-13T17:20:24.327Z",
+  "updatedAt": "2026-05-14T14:59:17.574Z",
   "latest": {
     "gameId": "2ec21879",
-    "issueId": "t082-20260514-005535"
+    "issueId": "t091-20260514-224517"
   },
   "games": [
     {
       "id": "2ec21879",
       "name": "对局 2ec21879",
       "shortId": "2ec21879",
-      "latestIssueId": "t082-20260514-005535",
+      "latestIssueId": "t091-20260514-224517",
       "issues": [
+        {
+          "id": "t091-20260514-224517",
+          "title": "罗马的胃口与玛雅的空碗",
+          "paperName": "看海日报",
+          "dateline": "公元530年·天命流转",
+          "year": "公元530年",
+          "turn": 91,
+          "generatedAt": "2026-05-14T22:45:17+08:00",
+          "generatedAtLabel": "2026-05-14 22:45:17"
+        },
         {
           "id": "t082-20260514-005535",
           "title": "鹰与猫的百年账",
