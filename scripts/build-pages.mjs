@@ -187,6 +187,7 @@ function extractSectionHeading(rawLine, knownSectionNames = new Set()) {
   const bracketMatch = /^【([^】]+)】\s*(.*)$/.exec(line);
   const colonCandidate = /^([^：:\n]{2,18})[：:]\s*(.+)$/.exec(line);
   const colonSection = colonCandidate ? stripInline(colonCandidate[1]) : "";
+  const bracketSection = bracketMatch ? stripInline(bracketMatch[1]) : "";
   const colonMatch = colonCandidate && (isMarkdownHeading || isBoldLine || knownSectionNames.has(colonSection))
     ? colonCandidate
     : null;
@@ -198,6 +199,8 @@ function extractSectionHeading(rawLine, knownSectionNames = new Set()) {
     section: stripInline(section),
     headline: explicitHeadline || stripInline(section),
     hasExplicitHeadline: Boolean(explicitHeadline),
+    isBoldLine,
+    isKnownSection: knownSectionNames.has(stripInline(section)) || knownSectionNames.has(bracketSection),
   };
 }
 
@@ -249,6 +252,14 @@ function parseBlocks(lines) {
       continue;
     }
     flushList();
+
+    const bracketInline = /^【([^】]{1,16})】\s*(.+)$/.exec(line);
+    if (bracketInline) {
+      flushParagraph();
+      blocks.push({ type: "subhead", text: stripInline(bracketInline[1]) });
+      paragraph.push(bracketInline[2]);
+      continue;
+    }
 
     const boldOnly = /^\*\*([^*]+)\*\*[:：]?$/.exec(line);
     if (boldOnly) {
@@ -313,8 +324,7 @@ function parsePaper(markdown, brief, runInfo) {
 
     const heading = extractSectionHeading(rawLine, knownSectionNames);
     const isMarkdownHeading = /^\s{0,3}#{1,6}\s+/.test(rawLine);
-    const hasHeadlineAfterKicker = heading?.hasExplicitHeadline;
-    const isSectionHeading = heading && (isMarkdownHeading || hasHeadlineAfterKicker || !current || afterDivider);
+    const isSectionHeading = heading && (isMarkdownHeading || heading.isBoldLine || heading.isKnownSection || !current || afterDivider);
     if (isSectionHeading) {
       closeCurrent();
       current = {
