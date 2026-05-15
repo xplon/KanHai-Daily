@@ -400,12 +400,14 @@ async function renderElementToCanvas(element, scale = 3) {
   if (!window.html2canvas) throw new Error("图片渲染器尚未加载。");
   const rect = element.getBoundingClientRect();
   return window.html2canvas(element, {
-    backgroundColor: null,
+    backgroundColor: "#ead8ad",
     scale,
     width: Math.ceil(rect.width),
     height: Math.ceil(rect.height),
     scrollX: 0,
     scrollY: -window.scrollY,
+    windowWidth: Math.ceil(document.documentElement.scrollWidth),
+    windowHeight: Math.ceil(document.documentElement.scrollHeight),
     useCORS: true,
     logging: false,
     onclone(clonedDocument) {
@@ -413,6 +415,8 @@ async function renderElementToCanvas(element, scale = 3) {
       if (clonedPaper) {
         clonedPaper.style.margin = "0";
         clonedPaper.style.boxShadow = "none";
+        clonedPaper.style.backgroundColor = "#ead8ad";
+        clonedPaper.style.color = "#17130e";
       }
     },
   });
