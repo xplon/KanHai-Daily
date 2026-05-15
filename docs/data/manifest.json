@@ -1,17 +1,27 @@
 {
   "schema": "kanhai-pages/v1",
-  "updatedAt": "2026-05-14T14:59:17.574Z",
+  "updatedAt": "2026-05-15T06:08:06.903Z",
   "latest": {
     "gameId": "2ec21879",
-    "issueId": "t091-20260514-224517"
+    "issueId": "t096-20260515-140602"
   },
   "games": [
     {
       "id": "2ec21879",
       "name": "对局 2ec21879",
       "shortId": "2ec21879",
-      "latestIssueId": "t091-20260514-224517",
+      "latestIssueId": "t096-20260515-140602",
       "issues": [
+        {
+          "id": "t096-20260515-140602",
+          "title": "罗马的黄昏与黎明",
+          "paperName": "看海日报",
+          "dateline": "公元680年·万国争衡",
+          "year": "公元680年",
+          "turn": 96,
+          "generatedAt": "2026-05-15T14:06:02+08:00",
+          "generatedAtLabel": "2026-05-15 14:06:02"
+        },
         {
           "id": "t091-20260514-224517",
           "title": "罗马的胃口与玛雅的空碗",
