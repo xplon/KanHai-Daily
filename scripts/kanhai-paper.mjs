@@ -449,17 +449,59 @@ function isMajorPoliticalCiv(civ) {
   return civ?.playerType === "Human" || (civ?.cities || []).length >= 2;
 }
 
-function savedDiplomaticStatus(diplo) {
-  // Unciv's DiplomacyManager defaults diplomaticStatus to War, so default values may be omitted from JSON.
-  return diplo?.diplomaticStatus || "War";
-}
-
 function diplomacyEntry(game, rawA, rawB) {
   const civ = (game.civilizations || []).find((item) => item.civID === rawA);
   return civ?.diplomacy?.[rawB] || null;
 }
 
-function warBasisForPair(game, rawA, rawB) {
+function explicitDiplomaticStatus(diplo) {
+  return typeof diplo?.diplomaticStatus === "string" ? diplo.diplomaticStatus : null;
+}
+
+function hasDeclaredWarFlag(diplo) {
+  return Number(diplo?.flagsCountdown?.DeclaredWar ?? 0) > 0;
+}
+
+function hasWarMemory(diplo) {
+  return (
+    Number.isFinite(diplo?.diplomaticModifiers?.DeclaredWarOnUs) ||
+    Number.isFinite(diplo?.diplomaticModifiers?.CapturedOurCities)
+  );
+}
+
+function politicalCivById(game, raw) {
+  return getPoliticalCivs(game).find((civ) => civ.civID === raw) || null;
+}
+
+function resolveDiplomaticPair(game, rawA, rawB) {
+  const dipA = diplomacyEntry(game, rawA, rawB);
+  const dipB = diplomacyEntry(game, rawB, rawA);
+  const statusA = explicitDiplomaticStatus(dipA);
+  const statusB = explicitDiplomaticStatus(dipB);
+
+  if (statusA === "War" || statusB === "War") {
+    return { status: "War", confidence: "explicit_status" };
+  }
+
+  const explicitNonWar = [statusA, statusB].find((status) => status && status !== "War");
+  if (explicitNonWar) {
+    return { status: explicitNonWar, confidence: "explicit_non_war" };
+  }
+
+  if (hasDeclaredWarFlag(dipA) || hasDeclaredWarFlag(dipB)) {
+    return { status: "War", confidence: "declared_war_flag" };
+  }
+
+  const civA = politicalCivById(game, rawA);
+  const civB = politicalCivById(game, rawB);
+  if (dipA && dipB && isMajorPoliticalCiv(civA) && isMajorPoliticalCiv(civB)) {
+    return { status: "War", confidence: "major_default_status" };
+  }
+
+  return { status: "Unknown", confidence: "missing_or_unhandled_status" };
+}
+
+function warMemoryBasisForPair(game, rawA, rawB) {
   const basis = [];
   const push = (text) => {
     if (text && !basis.includes(text)) basis.push(text);
@@ -471,10 +513,31 @@ function warBasisForPair(game, rawA, rawB) {
   ]) {
     const diplo = diplomacyEntry(game, holder, other);
     if (!diplo) continue;
-    if (diplo.diplomaticStatus === "War") {
+    if (Number.isFinite(diplo.diplomaticModifiers?.DeclaredWarOnUs)) {
+      push(`${displayCiv(holder)}对${displayCiv(other)}记录了 DeclaredWarOnUs 外交修正`);
+    }
+    if (Number.isFinite(diplo.diplomaticModifiers?.CapturedOurCities)) {
+      push(`${displayCiv(holder)}对${displayCiv(other)}记录了 CapturedOurCities 外交修正`);
+    }
+  }
+
+  return basis;
+}
+
+function warBasisForPair(game, rawA, rawB, resolution = resolveDiplomaticPair(game, rawA, rawB)) {
+  const basis = [];
+  const push = (text) => {
+    if (text && !basis.includes(text)) basis.push(text);
+  };
+
+  for (const [holder, other] of [
+    [rawA, rawB],
+    [rawB, rawA],
+  ]) {
+    const diplo = diplomacyEntry(game, holder, other);
+    if (!diplo) continue;
+    if (explicitDiplomaticStatus(diplo) === "War") {
       push(`${displayCiv(holder)}对${displayCiv(other)}的存档外交状态为 War`);
-    } else if (savedDiplomaticStatus(diplo) === "War") {
-      push(`${displayCiv(holder)}对${displayCiv(other)}未写 diplomaticStatus，按 Unciv 默认值 War 解释`);
     }
     if (diplo.flagsCountdown?.DeclaredWar) {
       push(`${displayCiv(holder)}对${displayCiv(other)}保留 DeclaredWar 外交旗标`);
@@ -485,6 +548,13 @@ function warBasisForPair(game, rawA, rawB) {
     if (Number.isFinite(diplo.diplomaticModifiers?.CapturedOurCities)) {
       push(`${displayCiv(holder)}对${displayCiv(other)}记录了 CapturedOurCities 外交修正`);
     }
+  }
+
+  if (resolution.confidence === "major_default_status") {
+    push("双方均未写 diplomaticStatus；两者均为主要文明，按 Unciv DiplomacyManager 默认 War 解释");
+  }
+  if (resolution.confidence === "declared_war_flag") {
+    push("至少一方仍保留 DeclaredWar 外交旗标");
   }
 
   return basis;
@@ -621,19 +691,22 @@ function activeWarRecords(game) {
   const political = new Map(getPoliticalCivs(game).map((civ) => [civ.civID, civ]));
   const wars = new Map();
   for (const civ of getPoliticalCivs(game)) {
-    for (const [other, diplo] of Object.entries(civ.diplomacy || {})) {
-      if (!political.has(other) || savedDiplomaticStatus(diplo) !== "War") continue;
+    for (const other of Object.keys(civ.diplomacy || {})) {
       const [rawA, rawB] = [civ.civID, other].sort();
       const key = `${rawA}|${rawB}`;
+      if (!political.has(other) || wars.has(key)) continue;
       const civA = political.get(rawA);
       const civB = political.get(rawB);
+      const resolution = resolveDiplomaticPair(game, rawA, rawB);
+      if (resolution.status !== "War") continue;
       wars.set(key, {
         civA: displayCiv(rawA),
         civB: displayCiv(rawB),
         rawCivA: rawA,
         rawCivB: rawB,
-        status: "War",
-        basis: warBasisForPair(game, rawA, rawB),
+        status: resolution.status,
+        confidence: resolution.confidence,
+        basis: warBasisForPair(game, rawA, rawB, resolution),
         scope: isMajorPoliticalCiv(civA) && isMajorPoliticalCiv(civB) ? "major_war" : "city_state_war",
         text: [displayCiv(rawA), displayCiv(rawB)].join(" vs "),
       });
@@ -680,13 +753,15 @@ function diplomaticRelationRecords(game) {
   const friendship = new Map();
   const protectorates = new Map();
   const warmRelations = new Map();
+  const uncertainRelations = new Map();
 
   for (const civ of getPoliticalCivs(game)) {
     for (const [other, diplo] of Object.entries(civ.diplomacy || {})) {
       if (!political.has(other)) continue;
       const [rawA, rawB] = [civ.civID, other].sort();
       const key = `${rawA}|${rawB}`;
-      const status = savedDiplomaticStatus(diplo);
+      const pairResolution = resolveDiplomaticPair(game, rawA, rawB);
+      const status = explicitDiplomaticStatus(diplo) || pairResolution.status;
       const relation = {
         civA: displayCiv(rawA),
         civB: displayCiv(rawB),
@@ -716,6 +791,17 @@ function diplomaticRelationRecords(game) {
           text: `${displayCiv(rawA)}与${displayCiv(rawB)}关系口径友好`,
         });
       }
+      if (pairResolution.status === "Unknown") {
+        const basis = warMemoryBasisForPair(game, rawA, rawB);
+        if (basis.length) {
+          uncertainRelations.set(key, {
+            ...relation,
+            status: "Unknown",
+            basis,
+            text: `${displayCiv(rawA)}与${displayCiv(rawB)}存在战争记忆或负面外交修正，但不能确认为当前正式战争`,
+          });
+        }
+      }
     }
   }
 
@@ -724,6 +810,7 @@ function diplomaticRelationRecords(game) {
     formalFriendships: [...friendship.values()].sort((a, b) => a.text.localeCompare(b.text, "zh-Hans-CN")),
     protectorates: [...protectorates.values()].sort((a, b) => a.text.localeCompare(b.text, "zh-Hans-CN")),
     warmRelations: [...warmRelations.values()].sort((a, b) => a.text.localeCompare(b.text, "zh-Hans-CN")),
+    uncertainRelations: [...uncertainRelations.values()].sort((a, b) => a.text.localeCompare(b.text, "zh-Hans-CN")),
   };
 }
 
@@ -820,6 +907,7 @@ function frontUnitCounts(game, rawA, rawB) {
 }
 
 function buildConflictTheaters(game, metrics, captures, declaredWars) {
+  const currentTurn = game.turns ?? 0;
   const metricByRaw = new Map(metrics.map((item) => [item.civ, item]));
   const candidates = new Map();
   const ensure = (rawA, rawB, reason, weight = 1, declared = false) => {
@@ -847,12 +935,20 @@ function buildConflictTheaters(game, metrics, captures, declaredWars) {
   };
 
   for (const war of declaredWars.filter((item) => item.scope === "major_war")) {
-    const candidate = ensure(war.rawCivA, war.rawCivB, "政治概览显示两国已宣战", 12, true);
+    const candidate = ensure(war.rawCivA, war.rawCivB, "政治概览显示两国已宣战", 40, true);
     if (candidate) candidate.warBasis.push(...(war.basis || []));
   }
 
   for (const capture of captures) {
-    if (capture.isMajorOriginalOwner) ensure(capture.rawCurrentOwner, capture.rawOriginalOwner, "近期或历史夺城线索", 6);
+    if (!capture.isMajorOriginalOwner) continue;
+    const age = capture.turn == null ? null : currentTurn - capture.turn;
+    const isRecent = age != null && age >= 0 && age <= 12;
+    ensure(
+      capture.rawCurrentOwner,
+      capture.rawOriginalOwner,
+      isRecent ? "当前战局中的夺城线索" : "历史夺城旧账",
+      isRecent ? 16 : 4,
+    );
   }
 
   const theaters = [];
@@ -863,6 +959,11 @@ function buildConflictTheaters(game, metrics, captures, declaredWars) {
       (capture) =>
         pairKey(capture.rawCurrentOwner, capture.rawOriginalOwner) === candidate.key,
     );
+    const recentCaptures = relatedCaptures.filter((capture) => {
+      const age = capture.turn == null ? null : currentTurn - capture.turn;
+      return age != null && age >= 0 && age <= 12;
+    });
+    const historicalCaptures = relatedCaptures.filter((capture) => !recentCaptures.includes(capture));
     const front = frontUnitCounts(game, candidate.rawA, candidate.rawB);
     const frontBalance = compareBand(candidate.civA, candidate.civB, front.aNearB, front.bNearA, "前线兵影");
     const militaryBalance = compareBand(candidate.civA, candidate.civB, metricA.force, metricB.force, "总体军势");
@@ -870,9 +971,14 @@ function buildConflictTheaters(game, metrics, captures, declaredWars) {
     const scienceBalance = compareBand(candidate.civA, candidate.civB, metricA.technologies, metricB.technologies, "科研积累");
     const terrain = frontTerrainSummary(game, candidate.rawA, candidate.rawB);
     const lines = [
-      candidate.declaredWar ? `${candidate.civA}与${candidate.civB}处于正式战争状态。` : "",
-      relatedCaptures.length
-        ? `${candidate.civA}与${candidate.civB}之间存在夺城旧账：${relatedCaptures
+      candidate.declaredWar ? `${candidate.civA}与${candidate.civB}处于正式战争状态，是当前仍在进行的战事。` : "",
+      recentCaptures.length
+        ? `${candidate.civA}与${candidate.civB}的当前战局已经出现城市易手：${recentCaptures
+            .map((capture) => `${capture.currentOwner}夺取${capture.originalOwner}${capture.isOriginalCapital ? "旧都" : "旧城"}${capture.city}`)
+            .join("；")}。`
+        : "",
+      historicalCaptures.length
+        ? `${candidate.civA}与${candidate.civB}之间存在历史夺城旧账：${historicalCaptures
             .map((capture) => `${capture.currentOwner}夺取${capture.originalOwner}${capture.isOriginalCapital ? "旧都" : "旧城"}${capture.city}`)
             .join("；")}。`
         : "",
@@ -896,6 +1002,19 @@ function buildConflictTheaters(game, metrics, captures, declaredWars) {
         cityRole: capture.cityRole,
         formerCapital: capture.isOriginalCapital,
       })),
+      activity: {
+        currentWar: candidate.declaredWar,
+        recentCapturedCities: recentCaptures.map((capture) => ({
+          year: capture.year,
+          city: capture.city,
+          from: capture.originalOwner,
+          to: capture.currentOwner,
+          cityRole: capture.cityRole,
+          formerCapital: capture.isOriginalCapital,
+        })),
+        historicalCapturedCityCount: historicalCaptures.length,
+        headlineEligible: candidate.declaredWar || recentCaptures.length > 0,
+      },
       balance: {
         military: militaryBalance,
         production: productionBalance,
@@ -904,7 +1023,11 @@ function buildConflictTheaters(game, metrics, captures, declaredWars) {
         terrain,
       },
       publicSignals: lines,
-      score: candidate.score + relatedCaptures.length * 3,
+      score:
+        candidate.score +
+        recentCaptures.length * 8 +
+        historicalCaptures.length * 2 +
+        (candidate.declaredWar ? 30 : 0),
     });
   }
 
@@ -1332,6 +1455,7 @@ function buildSourceClaims(
   conflictTheaters = [],
   politicalOverview = null,
   culturalSignals = {},
+  frontPageCandidates = [],
 ) {
   const claims = [];
   let index = 1;
@@ -1373,10 +1497,18 @@ function buildSourceClaims(
       "政治概览",
       `${war.civA}与${war.civB}处于正式战争状态。`,
       [
-        "Unciv 政治概览/外交状态；diplomaticStatus 缺省按 Unciv 默认 War 处理",
+        "Unciv 政治概览/外交状态；主要文明缺省状态仅在没有显式非战争状态时按默认 War 处理，城邦缺省状态不自动视为战争",
         ...(war.basis || []),
       ].join("；"),
       [`DIP-WAR-${war.civA}-${war.civB}`],
+    );
+  }
+  for (const candidate of frontPageCandidates.slice(0, 5)) {
+    add(
+      "头版候选",
+      `${candidate.topic}：${candidate.summary}`,
+      candidate.reason || "程序整理出的当期候选头版素材，由 LLM 判断是否采用",
+      candidate.sourceIds || [],
     );
   }
   for (const friend of politicalOverview?.formalFriendships || []) {
@@ -1578,6 +1710,81 @@ function resolveOutputPaths(args, game, brief) {
   return args;
 }
 
+function cleanMarkdownLine(line) {
+  return line
+    .trim()
+    .replace(/^#{1,6}\s+/, "")
+    .replace(/^[-*]\s+/, "")
+    .replace(/^\*+/, "")
+    .replace(/\*+$/, "")
+    .replace(/^【([^】]+)】\s*/, "$1：")
+    .trim();
+}
+
+function previousIssueSectionTitles(text) {
+  const columnNames = new Set(COLUMN_DECK.map((column) => column.name));
+  const titles = [];
+  for (const line of text.split(/\r?\n/)) {
+    const clean = cleanMarkdownLine(line);
+    const column = [...columnNames].find((name) => clean.startsWith(name));
+    if (!column) continue;
+    titles.push(clean.slice(0, 80));
+    if (titles.length >= 8) break;
+  }
+  return titles;
+}
+
+async function findPreviousIssueContext(args) {
+  const runsDir = path.join(PROJECT_DIR, "reports", "runs");
+  let dirs = [];
+  try {
+    dirs = await fs.readdir(runsDir, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+
+  const papers = [];
+  for (const dir of dirs) {
+    if (!dir.isDirectory()) continue;
+    const paperPath = path.join(runsDir, dir.name, "paper.md");
+    if (path.resolve(paperPath) === path.resolve(args.out)) continue;
+    try {
+      const stat = await fs.stat(paperPath);
+      if (stat.isFile()) papers.push({ paperPath, run: dir.name, modifiedAt: stat.mtimeMs });
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+  papers.sort((a, b) => b.modifiedAt - a.modifiedAt);
+  const latest = papers[0];
+  if (!latest) return null;
+
+  const text = await fs.readFile(latest.paperPath, "utf8");
+  const nonEmpty = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const sectionTitles = previousIssueSectionTitles(text);
+  return {
+    run: latest.run,
+    dateline: nonEmpty.slice(0, 3).map(cleanMarkdownLine).filter(Boolean).join(" / "),
+    frontPageTitle: sectionTitles.find((title) => title.startsWith("头版社论")) || sectionTitles[0] || "",
+    sectionTitles,
+    reusePolicy: "用于避免连续两期重复同一头版角度；若当前局势已经明显推进，可以延续主题，但需要换新的切入点。",
+  };
+}
+
+async function attachPreviousIssueContext(brief, args) {
+  const previousIssue = await findPreviousIssueContext(args);
+  brief.newspaper.previousIssue = previousIssue;
+  if (previousIssue) {
+    brief.editorialAngles.unshift(
+      `上一期头版/栏目参考：${[previousIssue.frontPageTitle, ...previousIssue.sectionTitles.slice(1, 4)]
+        .filter(Boolean)
+        .join("；")}。本期应尽量换新的头版角度，除非局势已经明显推进。`,
+    );
+  }
+  return brief;
+}
+
 function buildExpertPanels(metrics, wars, trades, conflictTheaters = [], politicalOverview = null, culturalSignals = {}) {
   const scoreLeader = rank(metrics, "score").at(0);
   const forceLeader = rank(metrics, "force").at(0);
@@ -1627,6 +1834,205 @@ function buildExpertPanels(metrics, wars, trades, conflictTheaters = [], politic
   };
 }
 
+function activeTheaterPriority(theater) {
+  let score = theater.declaredWar ? 100 : 0;
+  score += (theater.activity?.recentCapturedCities?.length || 0) * 25;
+  if (/压倒性优势/.test(theater.balance?.front || "")) score += 12;
+  if (/明显占优/.test(theater.balance?.front || "")) score += 8;
+  if (/压倒性优势/.test(theater.balance?.military || "")) score += 10;
+  if (/明显占优|略占上风/.test(theater.balance?.military || "")) score += 6;
+  return score;
+}
+
+function priorityHint(score) {
+  if (score >= 120) return "高";
+  if (score >= 70) return "中";
+  return "低";
+}
+
+function headlineCandidate(id, type, topic, summary, score, sourceIds = [], publicSignals = [], reason = "") {
+  return {
+    id,
+    type,
+    topic,
+    summary,
+    priorityHint: priorityHint(score),
+    reason,
+    sourceIds,
+    publicSignals: [...new Set(publicSignals)].slice(0, 8),
+  };
+}
+
+function buildFrontPageCandidates({
+  conflictTheaters = [],
+  captures = [],
+  events = [],
+  trendSignals = [],
+  broadcastSignals = {},
+  profiles = [],
+  currentTurn = 0,
+}) {
+  const candidates = [];
+  const add = (candidate) => {
+    if (!candidate?.topic) return;
+    if (candidates.some((item) => item.topic === candidate.topic)) return;
+    candidates.push(candidate);
+  };
+
+  const activeTheaters = conflictTheaters
+    .filter((theater) => theater.declaredWar)
+    .sort((a, b) => activeTheaterPriority(b) - activeTheaterPriority(a));
+  if (activeTheaters.length) {
+    const byCiv = new Map();
+    for (const theater of activeTheaters) {
+      for (const civ of theater.civs) {
+        const list = byCiv.get(civ) || [];
+        list.push(theater);
+        byCiv.set(civ, list);
+      }
+    }
+    const multiFront = [...byCiv.entries()]
+      .filter(([, theaters]) => theaters.length >= 2)
+      .sort(
+        (a, b) =>
+          b[1].reduce((sum, theater) => sum + activeTheaterPriority(theater), 0) -
+            a[1].reduce((sum, theater) => sum + activeTheaterPriority(theater), 0) ||
+          b[1].length - a[1].length,
+      )
+      .at(0);
+
+    if (multiFront) {
+      const [center, focusTheaters] = multiFront;
+      const opponents = focusTheaters
+        .flatMap((theater) => theater.civs.filter((civ) => civ !== center))
+        .filter((civ, index, list) => list.indexOf(civ) === index);
+      const recentCaptures = focusTheaters.flatMap((theater) => theater.activity?.recentCapturedCities || []);
+      add(
+        headlineCandidate(
+          `HEADLINE-MULTI-${center}`,
+          "current_ongoing_war",
+          `${center}与${opponents.join("、")}之间正在发生的多线战争`,
+          `${center}同时卷入与${opponents.join("、")}的多线战事，相关战区已经出现城市易手。`,
+          focusTheaters.reduce((sum, theater) => sum + activeTheaterPriority(theater), 30),
+          focusTheaters.map((theater) => theater.id),
+          [
+            ...focusTheaters.flatMap((theater) => theater.publicSignals || []),
+            recentCaptures.length
+              ? `当前战局已有城市易手：${recentCaptures
+                  .map((capture) => `${capture.to}夺取${capture.from}${capture.formerCapital ? "旧都" : "旧城"}${capture.city}`)
+                  .join("；")}。`
+              : "",
+          ].filter(Boolean),
+          "当前仍在进行的正式战争，且同一文明卷入多线战事。",
+        ),
+      );
+    }
+
+    for (const theater of activeTheaters.slice(0, 3)) {
+      const recentCaptures = theater.activity?.recentCapturedCities || [];
+      add(
+        headlineCandidate(
+          `HEADLINE-${theater.id}`,
+          "current_ongoing_war",
+          `${theater.civs.join("—")}之间正在发生的正式战争`,
+          `${theater.civs.join("—")}处于正式战争状态${recentCaptures.length ? "，并已经出现城市易手" : ""}。`,
+          activeTheaterPriority(theater),
+          [theater.id],
+          theater.publicSignals || [],
+          "当前正式战争关系与战区态势。",
+        ),
+      );
+    }
+  }
+
+  for (const capture of captures) {
+    const age = capture.turn == null ? null : currentTurn - capture.turn;
+    if (!capture.isMajorOriginalOwner || age == null || age < 0 || age > 12) continue;
+    add(
+      headlineCandidate(
+        `HEADLINE-CAPTURE-${capture.city}`,
+        "recent_city_capture",
+        `${capture.city}易手引发的局势变化`,
+        `${capture.currentOwner}近期夺取${capture.originalOwner}${capture.isOriginalCapital ? "旧都" : "旧城"}${capture.city}。`,
+        capture.isOriginalCapital ? 115 : 90,
+        [`CAP-${capture.city}`],
+        [`${capture.currentOwner}夺取${capture.originalOwner}${capture.isOriginalCapital ? "旧都" : "旧城"}${capture.city}。`],
+        "近期城市易手，适合用作战局转折或悼文素材。",
+      ),
+    );
+  }
+
+  const noteworthyEvents = events.filter((event) => ["全球广播", "War", "Production", "地方消息"].includes(event.kind));
+  for (const event of noteworthyEvents.slice(0, 5)) {
+    const isWar = event.kind === "War";
+    const isWorld = event.kind === "全球广播";
+    add(
+      headlineCandidate(
+        `HEADLINE-EVT-${event.civ}-${event.text}`,
+        isWar ? "current_incident" : "world_broadcast",
+        `${event.civ}：${event.text}`,
+        `${event.year || "近期"}，${event.civ}传出${event.text}。`,
+        isWar ? 65 : isWorld ? 55 : 45,
+        ["EVT"],
+        [`${event.year || "近期"}：${event.civ}传出${event.text}。`],
+        isWar ? "近期战场通知，适合作为头版背景或战地版。" : "近期广播或内政消息，适合作为非战争头版或副刊。",
+      ),
+    );
+  }
+
+  for (const signal of trendSignals.filter((item) => item.publicSignals?.length).slice(0, 5)) {
+    const strong =
+      /跃升|明显推进|大涨/.test(`${signal.militaryTrend} ${signal.scienceTrend} ${signal.productionTrend} ${signal.cultureTrend}`);
+    add(
+      headlineCandidate(
+        `HEADLINE-TREND-${signal.civ}`,
+        "strategic_trend",
+        `${signal.civ}的近期趋势变化`,
+        `${signal.civ}出现${signal.publicSignals.join("、")}`,
+        strong ? 60 : 40,
+        [signal.id],
+        signal.publicSignals,
+        "近期统计趋势的脱敏整理，可由 LLM 判断是否足以做头版。",
+      ),
+    );
+  }
+
+  const profile = profiles.find((item) => item.postureTags.some((tag) => tag !== "局势中游"));
+  if (profile) {
+    add(
+      headlineCandidate(
+        `HEADLINE-POSTURE-${profile.civ}`,
+        "civilization_posture",
+        `${profile.civ}的国势变化观察`,
+        `${profile.civ}被整理为：${profile.postureTags.join("、")}。`,
+        35,
+        [`CIV-${profile.civ}`],
+        [`${profile.civ}当前标签：${profile.postureTags.join("、")}。`],
+        "文明整体态势，适合作为社论背景，不应自动压过当前事件。",
+      ),
+    );
+  }
+
+  for (const [category, lines] of Object.entries(broadcastSignals)) {
+    for (const line of (lines || []).slice(0, 2)) {
+      add(
+        headlineCandidate(
+          `HEADLINE-BROADCAST-${category}-${line}`,
+          "world_broadcast",
+          line,
+          line,
+          category === "wonderAndReligion" ? 50 : 45,
+          ["EVT"],
+          [line],
+          "世界广播类素材，是否上头版由 LLM 根据当期戏剧性判断。",
+        ),
+      );
+    }
+  }
+
+  return candidates.slice(0, 8);
+}
+
 async function buildBrief(game) {
   const year = await gameYear(game);
   const metrics = civMetrics(game);
@@ -1647,6 +2053,8 @@ async function buildBrief(game) {
   const events = publicEvents(game);
   for (const event of events) {
     if (event.turn != null) {
+      const age = (game.turns ?? 0) - event.turn;
+      event.recency = age <= 2 ? "最新动态" : age <= 8 ? "近期动态" : "历史广播";
       const pseudoGame = { ...game, turns: event.turn };
       event.year = (await gameYear(pseudoGame)).label;
       delete event.turn;
@@ -1661,6 +2069,15 @@ async function buildBrief(game) {
     religions: religionLandscapeRecords(game),
     policies: policyPostureRecords(game),
   };
+  const frontPageCandidates = buildFrontPageCandidates({
+    conflictTheaters,
+    captures,
+    events,
+    trendSignals,
+    broadcastSignals,
+    profiles,
+    currentTurn: game.turns ?? 0,
+  });
 
   const preferredColumns = [];
   preferredColumns.push("头版社论");
@@ -1693,11 +2110,14 @@ async function buildBrief(game) {
   }
 
   const editorialAngles = [
+    frontPageCandidates.length
+      ? `头版候选：${frontPageCandidates.map((candidate) => `${candidate.topic}（${candidate.priorityHint}）`).join("；")}。由总编辑自行判断本期头版，不要机械照抄候选顺序。`
+      : "",
     weakest
       ? `${weakest.displayName}国势低迷，但讣告/悼文不是常规栏目；只有当本期明显围绕其败亡、失城或存亡危机时才使用。`
       : "",
-    scoreLeader ? `${scoreLeader.displayName}声势居前，可以写霸权观察、元老院信心或天命叙事。` : "",
-    forceLeader ? `${forceLeader.displayName}武备醒目，但公开稿不能给战术细节。` : "",
+    scoreLeader ? `${scoreLeader.displayName}声势居前，适合作为霸权观察或后续版面背景。` : "",
+    forceLeader ? `${forceLeader.displayName}武备醒目，但公开稿不能给战术细节，可作为局势背景。` : "",
     conflictTheaters.length
       ? `本期真正值得解释的战争线索：${conflictTheaters.map((theater) => `${theater.civs.join("—")}（${theater.status}）`).join("；")}。`
       : wars.length
@@ -1783,6 +2203,7 @@ async function buildBrief(game) {
     conflictTheaters,
     politicalOverview,
     culturalSignals,
+    frontPageCandidates,
   );
 
   return {
@@ -1794,6 +2215,8 @@ async function buildBrief(game) {
       name: "看海日报",
       availableColumns: COLUMN_DECK,
       preferredColumns: preferredEditionColumns,
+      frontPageCandidates,
+      previousIssue: null,
       layout: {
         mode: "front_plus_four",
         frontPageCount: 1,
@@ -1807,7 +2230,9 @@ async function buildBrief(game) {
         "让 LLM 自行选择，偏假装正经的娱乐报纸。默认写成 1+4 版式：头版社论 + 四个其他版面。具体栏目不要固定化；讣告/悼文是罕见强触发栏目，不要因为有弱国就自动写。",
       layoutPolicy: [
         "默认每期必须写 5 个版面：1 个头版 + 4 个其他版面。",
-        "头版一般使用“头版社论”，概括最重要的世界局势；其余四版从固定栏目中选择。",
+        "头版一般使用“头版社论”，由 LLM 在 frontPageCandidates 中自行选择最适合本期的头版题目；不要机械照抄候选顺序。",
+        "当前仍在进行的大事件通常优先于历史旧账，但战争不是写死的头版；若奇观、科技、外交或崩盘趋势更有新闻性，也可以上头版。",
+        "如果 previousIssue 存在，尽量避免重复上一期头版角度；除非局势已经明显推进，否则把上一期写过的主题放到背景或后续版面。",
         "不要在正文中新增方括号版号、页码式版号或其他显式版面标记，也不要改变现有 Markdown 栏目标题和分隔线风格。",
         "栏目之间尽量主题正交：头版讲大战略，战地讲一个战区，经济讲另一个国家或贸易，文化/市井讲不同素材。",
         "不要所有栏目都围绕同一文明或同一事件。",
@@ -1837,7 +2262,12 @@ async function buildBrief(game) {
         civs: [item.civA, item.civB],
         text: item.text,
       })),
-      note: "友好、保护和贸易关系不等于没有宣战；宣战关系以 declaredWars 为准。",
+      uncertainRelations: politicalOverview.uncertainRelations.map((item) => ({
+        civs: [item.civA, item.civB],
+        text: item.text,
+        basis: item.basis,
+      })),
+      note: "友好、保护和贸易关系不等于没有宣战；缺省或未知外交状态也不等于宣战。正式战争只以 declaredWars 为准，uncertainRelations 只能写成历史恩怨或外交阴影。",
     },
     sourceClaims,
     mildlySensitiveIntel: {
@@ -1973,6 +2403,7 @@ async function buildEvidenceReport(game, brief, args, sourcePack) {
     ["完整 LLM 可见素材", args.sourcePackOut, "source-pack.json 中的 `brief` 字段就是写入 prompt 的 JSON"],
     ["完整 LLM prompt", args.promptOut, "ai-prompt.md 是实际发送给模型的用户提示词"],
     ["公开事件数", brief.publicEvents?.length ?? 0, "`brief.publicEvents`"],
+    ["未确认外交关系数", brief.politicalOverview?.uncertainRelations?.length ?? 0, "`brief.politicalOverview.uncertainRelations`"],
     ["地图趋势数", brief.strategicSignals?.mapPressure?.length ?? 0, "`brief.strategicSignals.mapPressure`"],
     ["内政趋势数", brief.strategicSignals?.domesticTrends?.length ?? 0, "`brief.strategicSignals.domesticTrends`"],
     ["战区态势数", brief.strategicSignals?.conflictTheaters?.length ?? 0, "`brief.strategicSignals.conflictTheaters`"],
@@ -2006,10 +2437,17 @@ async function buildEvidenceReport(game, brief, args, sourcePack) {
       "战争状态",
       `${war.civA} vs ${war.civB}`,
       [
-        `政治概览显示 At war；存档 diplomaticStatus 为 ${war.status}（缺省值按 Unciv 默认 War 处理）`,
+        `政治概览确认为当前战争；判定方式：${war.confidence}`,
         ...(war.basis || []),
       ].join("；"),
       `正式宣战关系：${war.civA}与${war.civB}处于战争状态`,
+    ]),
+    ...diplomaticRelationRecords(game).uncertainRelations.map((item, index) => [
+      `UNCERTAIN-${String(index + 1).padStart(2, "0")}`,
+      "未确认状态",
+      `${item.civA} 与 ${item.civB}`,
+      item.basis.join("；"),
+      `${item.text}；不能写成正式战争。`,
     ]),
     ...diplomaticRelationRecords(game).formalFriendships.map((friend, index) => [
       `FRIEND-${String(index + 1).padStart(2, "0")}`,
@@ -2163,7 +2601,15 @@ ${JSON.stringify(
   {
     dateline: sourcePack.brief.dateline,
     layout: sourcePack.brief.newspaper?.layout,
+    frontPageCandidateCount: sourcePack.brief.newspaper?.frontPageCandidates?.length ?? 0,
+    previousIssue: sourcePack.brief.newspaper?.previousIssue
+      ? {
+          run: sourcePack.brief.newspaper.previousIssue.run,
+          frontPageTitle: sourcePack.brief.newspaper.previousIssue.frontPageTitle,
+        }
+      : null,
     preferredColumns: sourcePack.brief.newspaper?.preferredColumns,
+    uncertainRelationCount: sourcePack.brief.politicalOverview?.uncertainRelations?.length ?? 0,
     sourceClaimCount: sourcePack.brief.sourceClaims?.length ?? 0,
     publicEventCount: sourcePack.brief.publicEvents?.length ?? 0,
     strategicSignalCount:
@@ -2283,6 +2729,9 @@ async function buildPrompt(brief, args) {
 - ${styleHint}
 - 开头固定两行：第一行“看海日报”；第二行“${brief.dateline.year}·四个汉字副题”。副题由你拟，必须是四个汉字，不要写“四个汉字副题”这几个字。
 - 报头之后默认必须写成 1+4 版式：1 个头版 + 4 个其他版面，共 5 个自然栏目。
+- 头版由你从 brief.newspaper.frontPageCandidates 中选择最值得写的当前热点；priorityHint 只是参考，不是命令。
+- 当前正在发生的大事件通常更适合头版，但不要机械选择战争；若奇观、科技、外交、崩盘趋势或上一期延续事件更有新闻性，也可以成为头版。
+- 如果 brief.newspaper.previousIssue 存在，要参考上一期头版和栏目，尽量换新的切入角度；除非局势已经明显推进，不要连续两期用同一套头版叙事。
 - 不要在正文中新增方括号版号、页码式版号或其他显式版面标记，也不要改变当前 Markdown 栏目标题和分隔线风格；继续使用自然栏目标题，例如“头版社论：本版标题”“战地通讯：本版标题”“独家密电：本版标题”。
 - 其他四版必须从 brief.newspaper.availableColumns 或 preferredColumns 中选择合适栏目；如果素材不足，优先使用“独家密电”“政治观察”“文化副刊”“市井版”等可容纳评论和副刊梗的栏目补足。
 - 五个版面要尽量正交：头版总揽全局，其他四版分别写不同主题或不同文明，不要把同一场战争用五种标题重复一遍。
@@ -2291,6 +2740,7 @@ async function buildPrompt(brief, args) {
 - 所有具体事实只能来自 brief.publicEvents、brief.strategicSignals、brief.sourceClaims 和 mildlySensitiveIntel.expertPanels；不要凭空增加具体战果、条约、工程、奇观、文明关系或城市状态。
 - brief.sourceClaims 是事实锚点；可以文学化改写，但不要在公开稿里输出 SRC 编号。
 - 夺城记录默认只能写成“旧城”“城池”“城市易手”；只有 formerCapital=true 或 cityRole 明确标注“原始首都/旧都”时，才可以写“旧都”“首都陷落”“都城”。
+- brief.politicalOverview.uncertainRelations 是未确认关系，只能写成外交阴影、战争记忆、旧怨或传闻；不能写成“正在交战”“已经宣战”。
 - 不要写“来自某方向”“沿某路”“逼近某城”“某城附近”这类方向性或位置性暗示。
 - 未在 brief 中给出方向时，不要写东、西、南、北、一东一西、南方兵锋等地理方向词。
 - 不要在公开稿里出现 JSON 字段名或技术证据名，例如 diplomaticStatus、DeclaredWarOnUs、CapturedOurCities、sourceClaims、declaredWar 等。
@@ -2553,6 +3003,7 @@ async function main() {
   const game = await loadGame(args);
   const brief = await buildBrief(game);
   resolveOutputPaths(args, game, brief);
+  await attachPreviousIssueContext(brief, args);
   const sourcePack = buildSourcePack(game, brief, args);
   const prompt = await buildPrompt(brief, args);
   const evidence = await buildEvidenceReport(game, brief, args, sourcePack);

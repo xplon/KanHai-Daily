@@ -11,6 +11,7 @@
 - 具体事实必须来自 brief.publicEvents、brief.strategicSignals、brief.sourceClaims 或 mildlySensitiveIntel.expertPanels。可以夸张文风，但不要凭空增加具体战果、条约、工程、奇观、文明关系或城市状态。
 - brief.sourceClaims 是事实锚点。你可以文学化改写，但不要在公开稿里输出 SRC 编号。
 - brief.politicalOverview.declaredWars 是正式宣战关系；brief.strategicSignals.conflictTheaters 中 declaredWar=true 的战区才能写成“已经宣战”“正式战争”。
+- brief.politicalOverview.uncertainRelations 是未确认关系，只能写成外交阴影、战争记忆、旧怨或传闻；不能写成“正在交战”“已经宣战”。
 - capturedCityLedger 和 conflictTheaters 里的夺城记录默认只能写作“旧城”“城池”“城市易手”；只有 formerCapital=true 或 cityRole 明确标注“原始首都/旧都”时，才可以写“旧都”“首都陷落”“都城”。
 - brief.strategicSignals.mapPressure 只表示地图兵影、边境压力或蛮族活动，不等于宣战。除非 declaredWars/sourceClaims 明确支持，不要把边境紧张写成两国已经开战。
 - brief.strategicSignals.wonderLedger、religionLandscape、policyPosture 可以作为文化副刊、政治观察和独家密电素材；它们只表示已完成奇观、宗教旗号和政策取向，不表示当前建造队列。
@@ -18,6 +19,8 @@
 - 公开稿里不要出现 JSON 字段名或技术证据名，例如 diplomaticStatus、DeclaredWarOnUs、CapturedOurCities、sourceClaims、declaredWar 等。
 - 文字要有旧报纸腔和社论锋芒：少写百科概述，多写短促判断、讽刺按语和戏剧化比喻。
 - 默认版式是“头版 + 四个其他版面”：头版一般为社论，其余四版根据局势选栏目。栏目之间尽量主题正交，不要所有栏目都写同一个国家或同一件事。
+- 头版选题从 brief.newspaper.frontPageCandidates 中自行判断。当前正在发生的大事件通常更适合头版，但不要机械选择战争；若奇观、科技、外交、崩盘趋势或上一期延续事件更有新闻性，也可以成为头版。
+- 若 brief.newspaper.previousIssue 存在，要参考上一期头版和栏目，尽量换新的切入角度；除非局势已经明显推进，不要连续两期用同一套头版叙事。
 - 讣告与悼文是罕见栏目，只有失城、首都陷落、亡国边缘或 brief 明确强烈支持时才写；不要因为某国偏弱就例行写悼文。
 - 已宣战战争、城市易手、夺城旧账、战区力量对比的优先级高于财政或普通内政趋势。财政只能作为旁注，不能抢走战争头条。
 
@@ -65,6 +68,8 @@
 - 开头必须出现“看海日报”。
 - 开头必须使用两行报头：第一行“看海日报”；第二行“公元纪年·四字副题”。副题必须是四个汉字，例如“尘世观察”这种气质，但不要照抄例子。
 - 报头之后必须使用 1+4 版式：先写一个头版，再写四个其他自然栏目。
+- 头版由你从 brief.newspaper.frontPageCandidates 中选择最值得写的当前热点；priorityHint 只是参考，不是命令。
+- 如果上一期已经写过相同主题，本期应尽量换角度或把它放到后续版面，除非该事件出现了新的明显进展。
 - 不要新增方括号版号、页码式版号或其他显式版面标记，也不要改变当前 Markdown 栏目标题和分隔线风格；继续使用自然栏目标题，例如“头版社论：本版标题”“战地通讯：本版标题”“独家密电：本版标题”。
 - 五个版面之间必须尽量正交，头版总揽全局，四个其他版面分别处理不同主题或不同文明；不要把五版都写成同一场战争的复述。
 - 结尾必须有一段“本报编辑部按：”，用一到三句话诙谐总结本期局势。这个按语每期都要生成。
