@@ -1,17 +1,27 @@
 {
   "schema": "kanhai-pages/v1",
-  "updatedAt": "2026-05-15T06:20:44.558Z",
+  "updatedAt": "2026-05-16T15:34:50.804Z",
   "latest": {
     "gameId": "2ec21879",
-    "issueId": "t096-20260515-140602"
+    "issueId": "t107-20260516-232923"
   },
   "games": [
     {
       "id": "2ec21879",
       "name": "对局 2ec21879",
       "shortId": "2ec21879",
-      "latestIssueId": "t096-20260515-140602",
+      "latestIssueId": "t107-20260516-232923",
       "issues": [
+        {
+          "id": "t107-20260516-232923",
+          "title": "帝国棋局",
+          "paperName": "看海日报",
+          "dateline": "公元940年·帝国棋局",
+          "year": "公元940年",
+          "turn": 107,
+          "generatedAt": "2026-05-16T23:29:23+08:00",
+          "generatedAtLabel": "2026-05-16 23:29:23"
+        },
         {
           "id": "t096-20260515-140602",
           "title": "罗马的黄昏与黎明",
