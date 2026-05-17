@@ -1,17 +1,27 @@
 {
   "schema": "kanhai-pages/v1",
-  "updatedAt": "2026-05-16T15:34:50.804Z",
+  "updatedAt": "2026-05-17T15:40:18.955Z",
   "latest": {
     "gameId": "2ec21879",
-    "issueId": "t107-20260516-232923"
+    "issueId": "t108-20260517-230903"
   },
   "games": [
     {
       "id": "2ec21879",
       "name": "对局 2ec21879",
       "shortId": "2ec21879",
-      "latestIssueId": "t107-20260516-232923",
+      "latestIssueId": "t108-20260517-230903",
       "issues": [
+        {
+          "id": "t108-20260517-230903",
+          "title": "两线崩塌与蒙古的黄昏",
+          "paperName": "看海日报",
+          "dateline": "公元960年·草原挽歌",
+          "year": "公元960年",
+          "turn": 108,
+          "generatedAt": "2026-05-17T23:09:03+08:00",
+          "generatedAtLabel": "2026-05-17 23:09:03"
+        },
         {
           "id": "t107-20260516-232923",
           "title": "帝国棋局",
