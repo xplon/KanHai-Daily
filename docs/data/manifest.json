@@ -1,17 +1,27 @@
 {
   "schema": "kanhai-pages/v1",
-  "updatedAt": "2026-05-17T15:40:18.955Z",
+  "updatedAt": "2026-05-18T15:24:25.644Z",
   "latest": {
     "gameId": "2ec21879",
-    "issueId": "t108-20260517-230903"
+    "issueId": "t115-20260518-231248"
   },
   "games": [
     {
       "id": "2ec21879",
       "name": "对局 2ec21879",
       "shortId": "2ec21879",
-      "latestIssueId": "t108-20260517-230903",
+      "latestIssueId": "t115-20260518-231248",
       "issues": [
+        {
+          "id": "t115-20260518-231248",
+          "title": "三姓家奴与两线残阳",
+          "paperName": "看海日报",
+          "dateline": "公元1100年·旧都易主",
+          "year": "公元1100年",
+          "turn": 115,
+          "generatedAt": "2026-05-18T23:12:48+08:00",
+          "generatedAtLabel": "2026-05-18 23:12:48"
+        },
         {
           "id": "t108-20260517-230903",
           "title": "两线崩塌与蒙古的黄昏",
