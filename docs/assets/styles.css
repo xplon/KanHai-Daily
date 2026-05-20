@@ -35,6 +35,51 @@ body {
     linear-gradient(135deg, var(--desk), var(--desk-deep));
 }
 
+body[data-issue-tone="obituary"] {
+  --ink: #111;
+  --ink-soft: #3f3f3f;
+  --paper: #dfddd5;
+  --paper-light: #f6f5f0;
+  --paper-dark: #aaa79d;
+  --desk: #252525;
+  --desk-deep: #0d0d0d;
+  --oxide: #191919;
+  --brass: #5f5f5f;
+  --line: rgba(15, 15, 15, 0.56);
+  --shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px) 0 0 / 48px 48px,
+    linear-gradient(180deg, rgba(255, 255, 255, 0.024) 1px, transparent 1px) 0 0 / 48px 48px,
+    radial-gradient(circle at 50% -20%, rgba(255, 255, 255, 0.12), transparent 40%),
+    linear-gradient(135deg, var(--desk), var(--desk-deep));
+}
+
+body[data-issue-tone="obituary"] .topbar,
+body[data-issue-tone="obituary"] .rail {
+  color: #f0f0f0;
+}
+
+body[data-issue-tone="obituary"] .brand small,
+body[data-issue-tone="obituary"] .selectors label,
+body[data-issue-tone="obituary"] .archive-date,
+body[data-issue-tone="obituary"] .archive-item small {
+  color: rgba(240, 240, 240, 0.66);
+}
+
+body[data-issue-tone="obituary"] .brand-mark,
+body[data-issue-tone="obituary"] .selectors select,
+body[data-issue-tone="obituary"] .share-actions button,
+body[data-issue-tone="obituary"] .archive-item {
+  border-color: rgba(240, 240, 240, 0.32);
+  background: rgba(18, 18, 18, 0.62);
+  color: #f2f2f2;
+}
+
+body[data-issue-tone="obituary"] .archive-item.is-active {
+  border-left-color: #d9d9d9;
+  background: rgba(255, 255, 255, 0.12);
+}
+
 button,
 select {
   font: inherit;
@@ -253,6 +298,16 @@ select {
   border: 1px solid rgba(44, 30, 17, 0.46);
   box-shadow: var(--shadow);
   color: var(--ink);
+}
+
+.newspaper-paper[data-tone="obituary"] {
+  background:
+    linear-gradient(90deg, rgba(40, 40, 40, 0.055) 1px, transparent 1px) 0 0 / 18px 18px,
+    linear-gradient(180deg, rgba(40, 40, 40, 0.035) 1px, transparent 1px) 0 0 / 18px 18px,
+    radial-gradient(circle at 18% 14%, rgba(255, 255, 255, 0.3), transparent 24%),
+    linear-gradient(135deg, var(--paper-light), var(--paper) 54%, var(--paper-dark));
+  border-color: rgba(20, 20, 20, 0.58);
+  filter: grayscale(1);
 }
 
 .newspaper-paper[data-layout="compact"] {

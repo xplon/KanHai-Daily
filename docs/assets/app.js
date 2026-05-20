@@ -40,6 +40,7 @@ const SECTION_PRIORITY = {
 };
 const OPTIONAL_SECTION_RE = /\u5e02\u4e95|\u62db\u8058|\u5360\u661f|\u5929\u8c61|\u86ee\u65cf|\u62a5\u7f1d|\u62fe\u95fb|\u70ed\u7ebf/u;
 const STRONG_SECTION_RE = /\u8ba3\u544a|\u60bc\u6587|\u4ea1\u56fd|\u706d\u4ea1|\u9996\u90fd|\u9677\u843d|\u6218\u5730|\u653f\u6cbb|\u79d1\u5b66|\u5947\u89c2/u;
+const OBITUARY_ISSUE_RE = /\u8ba3\u544a|\u60bc\u6587|\u4ea1\u56fd|\u706d\u4ea1/u;
 
 init().catch((error) => {
   nodes.newspaper.replaceChildren(el("div", { className: "loading error" }, `页面数据加载失败：${error.message}`));
@@ -133,7 +134,10 @@ function renderPaper() {
   const issue = state.issue;
   document.title = `${issue.paperName} - ${issue.dateline}`;
   const layout = chooseLayout(issue);
+  const isObituaryIssue = issueHasObituary(issue);
+  document.body.dataset.issueTone = isObituaryIssue ? "obituary" : "";
   nodes.newspaper.dataset.layout = layout.name;
+  nodes.newspaper.dataset.tone = isObituaryIssue ? "obituary" : "standard";
   nodes.newspaper.style.setProperty("--paper-max", `${layout.maxWidth}px`);
   nodes.newspaper.style.setProperty("--lead-columns", String(layout.leadColumns));
   nodes.newspaper.style.setProperty("--body-columns", String(layout.bodyColumns));
@@ -229,6 +233,13 @@ function sectionDisplayPriority(section) {
   if (STRONG_SECTION_RE.test(label)) return SECTION_PRIORITY.strong;
   if (OPTIONAL_SECTION_RE.test(label)) return SECTION_PRIORITY.optional;
   return SECTION_PRIORITY.regular;
+}
+
+function issueHasObituary(issue) {
+  return (issue.sections || []).some((section) => {
+    const label = `${cleanText(section.kicker)} ${cleanText(section.headline)}`;
+    return OBITUARY_ISSUE_RE.test(label);
+  });
 }
 
 function sectionWeight(section) {
