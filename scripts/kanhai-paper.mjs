@@ -419,6 +419,14 @@ function unwrap(text) {
     .trim();
 }
 
+function civilizationDestructionMatch(text) {
+  return /^The civilization of (.+) has been destroyed!?$/i.exec(unwrap(text));
+}
+
+function cityStateDestructionMatch(text) {
+  return /^The City-State of (.+) has been destroyed!?$/i.exec(unwrap(text));
+}
+
 function baseRulesetName(game) {
   return game.gameParameters?.baseRuleset || "Civ V - Gods & Kings";
 }
@@ -436,6 +444,20 @@ function getMajorCivs(game) {
     if (civ.civID === "Barbarians" || civ.civID === "Spectator") return false;
     return civ.playerType === "Human" || (civ.cities || []).length >= 2;
   });
+}
+
+function isHistoricalMajorCiv(civ) {
+  if (!civ?.civID || civ.civID === "Barbarians" || civ.civID === "Spectator") return false;
+  return (
+    civ.playerType === "Human" ||
+    (civ.cities || []).length >= 2 ||
+    Object.keys(civ.statsHistory || {}).length > 0 ||
+    Boolean(civ.policies?.adoptedPolicies?.length)
+  );
+}
+
+function getHistoricalMajorCivs(game) {
+  return (game.civilizations || []).filter(isHistoricalMajorCiv);
 }
 
 function getPoliticalCivs(game) {
@@ -622,6 +644,87 @@ function getUnitCounts(game) {
     }
   }
   return counts;
+}
+
+function uncivDefeatStatus(civ, unitCounts = {}) {
+  const rawCiv = civ?.civID || "未知文明";
+  const currentCityCount = (civ?.cities || []).length;
+  const currentUnitCount = unitCounts[rawCiv]?.total ?? 0;
+  const hasEverOwnedOriginalCapital = Boolean(civ?.hasEverOwnedOriginalCapital);
+
+  if (rawCiv === "Barbarians" || rawCiv === "Spectator") {
+    return {
+      defeated: false,
+      ruleName: "excluded_non_defeatable",
+      ruleText: "Unciv Civilization.isDefeated：蛮族与看海旁观者不会败亡。",
+      metricText: `civID=${rawCiv}`,
+      hasEverOwnedOriginalCapital,
+      currentCityCount,
+      currentUnitCount,
+    };
+  }
+
+  if (hasEverOwnedOriginalCapital) {
+    return {
+      defeated: currentCityCount === 0,
+      ruleName: "original_capital_city_count",
+      ruleText: "Unciv Civilization.isDefeated：曾拥有原始首都的文明，当前城市数为 0 即败亡。",
+      metricText: `hasEverOwnedOriginalCapital=true；currentCityCount=${currentCityCount}`,
+      hasEverOwnedOriginalCapital,
+      currentCityCount,
+      currentUnitCount,
+    };
+  }
+
+  return {
+    defeated: currentUnitCount === 0,
+    ruleName: "unit_count_without_original_capital",
+    ruleText: "Unciv Civilization.isDefeated：未曾拥有原始首都的文明，当前单位数为 0 即败亡。",
+    metricText: `hasEverOwnedOriginalCapital=false；currentUnitCount=${currentUnitCount}`,
+    hasEverOwnedOriginalCapital,
+    currentCityCount,
+    currentUnitCount,
+  };
+}
+
+function destructionNotificationRecords(game) {
+  const records = new Map();
+  for (const observer of game.civilizations || []) {
+    for (const log of observer.notificationsLog || []) {
+      for (const notification of log.notifications || []) {
+        const text = unwrap(notification.text);
+        const match = civilizationDestructionMatch(text);
+        if (!match) continue;
+        const rawDestroyedCiv = match[1];
+        const key = `${rawDestroyedCiv}|${log.turn ?? "unknown"}`;
+        const record = records.get(key) || {
+          key,
+          turn: log.turn ?? null,
+          rawDestroyedCiv,
+          destroyedCiv: displayCiv(rawDestroyedCiv),
+          notificationCount: 0,
+          observedBy: [],
+          rawTexts: [],
+        };
+        record.notificationCount += 1;
+        const observerName = displayCiv(observer.civID);
+        if (!record.observedBy.includes(observerName)) record.observedBy.push(observerName);
+        if (!record.rawTexts.includes(text)) record.rawTexts.push(text);
+        records.set(key, record);
+      }
+    }
+  }
+  return [...records.values()].sort((a, b) => (a.turn ?? 0) - (b.turn ?? 0));
+}
+
+function destructionNotificationsByCiv(game) {
+  const byCiv = new Map();
+  for (const record of destructionNotificationRecords(game)) {
+    const list = byCiv.get(record.rawDestroyedCiv) || [];
+    list.push(record);
+    byCiv.set(record.rawDestroyedCiv, list);
+  }
+  return byCiv;
 }
 
 function civMetrics(game) {
@@ -815,7 +918,7 @@ function diplomaticRelationRecords(game) {
 }
 
 function cityCaptureRecords(game) {
-  const major = new Set(getMajorCivs(game).map((civ) => civ.civID));
+  const major = new Set(getHistoricalMajorCivs(game).map((civ) => civ.civID));
   const records = [];
   for (const civ of getMajorCivs(game)) {
     for (const city of civ.cities || []) {
@@ -838,6 +941,101 @@ function cityCaptureRecords(game) {
     }
   }
   return records.sort((a, b) => (a.turn ?? 0) - (b.turn ?? 0));
+}
+
+function fallenCivilizationRecords(game, captures) {
+  const currentTurn = game.turns ?? 0;
+  const unitCounts = getUnitCounts(game);
+  const notificationsByCiv = destructionNotificationsByCiv(game);
+  return getHistoricalMajorCivs(game)
+    .map((civ) => {
+      const defeat = uncivDefeatStatus(civ, unitCounts);
+      if (!defeat.defeated) return null;
+
+      const destroyedNotifications = notificationsByCiv.get(civ.civID) || [];
+      const lostCities = captures
+        .filter((capture) => capture.rawOriginalOwner === civ.civID)
+        .sort((a, b) => (b.turn ?? -Infinity) - (a.turn ?? -Infinity));
+
+      const latestCityTurn = lostCities[0]?.turn ?? null;
+      const latestNotificationTurn = destroyedNotifications
+        .map((record) => record.turn)
+        .filter(Number.isFinite)
+        .sort((a, b) => b - a)
+        .at(0);
+      const latestTurn = [latestNotificationTurn, latestCityTurn].filter(Number.isFinite).sort((a, b) => b - a).at(0) ?? null;
+      const finalCaptures = latestCityTurn == null ? [] : lostCities.filter((capture) => capture.turn === latestCityTurn);
+      const capitalCapture = lostCities.find((capture) => capture.isOriginalCapital);
+      const conquerors = [...new Set(lostCities.map((capture) => capture.currentOwner))];
+      const age = latestTurn == null ? null : currentTurn - latestTurn;
+      const recent = age != null && age >= 0 && age <= 12;
+      const finalCityText = finalCaptures.length
+        ? finalCaptures
+            .map((capture) => `${capture.currentOwner}夺取${capture.originalOwner}${capture.isOriginalCapital ? "旧都" : "旧城"}${capture.city}`)
+            .join("；")
+        : `${displayCiv(civ.civID)}当前没有现存城市`;
+      const noticeCount = destroyedNotifications.reduce((sum, record) => sum + record.notificationCount, 0);
+      const noticeText = noticeCount
+        ? `通知日志出现${noticeCount > 1 ? "多条" : "一条"}${displayCiv(civ.civID)}毁灭通告。`
+        : "未在近期可见通知中找到毁灭通告，但存档败亡规则已经确认。";
+
+      return {
+        id: `FALL-${displayCiv(civ.civID)}`,
+        civ: displayCiv(civ.civID),
+        status: recent ? "近期亡国确认" : "已亡国确认",
+        latestTurn,
+        cityLossTurn: latestCityTurn,
+        notificationTurn: latestNotificationTurn ?? null,
+        year: null,
+        conquerors,
+        finalCities: finalCaptures.map((capture) => ({
+          year: capture.year,
+          city: capture.city,
+          to: capture.currentOwner,
+          cityRole: capture.cityRole,
+          formerCapital: capture.isOriginalCapital,
+        })),
+        capital: capitalCapture
+          ? {
+              year: capitalCapture.year,
+              city: capitalCapture.city,
+              to: capitalCapture.currentOwner,
+              formerCapital: capitalCapture.isOriginalCapital,
+            }
+          : null,
+        lostCityCount: lostCities.length,
+        obituaryTrigger: recent,
+        confirmedDefeated: true,
+        defeatBasis: {
+          source: "Unciv Civilization.isDefeated()",
+          sourceFile: "Unciv/core/src/com/unciv/logic/civilization/Civilization.kt",
+          ruleName: defeat.ruleName,
+          ruleText: defeat.ruleText,
+          metricText: defeat.metricText,
+          hasEverOwnedOriginalCapital: defeat.hasEverOwnedOriginalCapital,
+          currentCityCount: defeat.currentCityCount,
+          currentUnitCount: defeat.currentUnitCount,
+        },
+        destroyedNotifications: destroyedNotifications.map((record) => ({
+          turn: record.turn,
+          year: null,
+          count: record.notificationCount,
+          observedBy: record.observedBy,
+          text: `${record.destroyedCiv}灭亡通告`,
+        })),
+        publicSignals: [
+          `官方败亡规则确认${displayCiv(civ.civID)}已经灭亡，属于${recent ? "近期亡国" : "亡国"}级事件。`,
+          noticeText,
+          `${finalCityText}。`,
+          capitalCapture
+            ? `${displayCiv(civ.civID)}旧都${capitalCapture.city}此前已由${capitalCapture.currentOwner}夺取。`
+            : "",
+          conquerors.length ? `相关城池如今分属：${conquerors.join("、")}。` : "",
+        ].filter(Boolean),
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => (b.latestTurn ?? -Infinity) - (a.latestTurn ?? -Infinity));
 }
 
 function pairKey(a, b) {
@@ -1039,30 +1237,37 @@ function buildConflictTheaters(game, metrics, captures, declaredWars) {
 
 function sanitizeEventText(text) {
   let match;
-  if ((match = /^(.+) has been built in a faraway land$/.exec(text))) {
+  const normalized = unwrap(text);
+  if ((match = civilizationDestructionMatch(normalized))) {
+    return `${displayCiv(match[1])}灭亡通告`;
+  }
+  if ((match = cityStateDestructionMatch(normalized))) {
+    return `${displayCiv(match[1])}城邦灭亡通告`;
+  }
+  if ((match = /^(.+) has been built in a faraway land$/.exec(normalized))) {
     return `远方建成${displayBuilding(match[1])}`;
   }
-  if ((match = /^(.+) has entered the (.+) era!?$/.exec(text))) {
+  if ((match = /^(.+) has entered the (.+) era!?$/.exec(normalized))) {
     return `${displayCiv(match[1])}进入${displayEra(match[2])}`;
   }
-  if ((match = /^(.+) has enhanced (.+?)!?$/.exec(text))) {
+  if ((match = /^(.+) has enhanced (.+?)!?$/.exec(normalized))) {
     return `${displayCiv(match[1])}强化了${displayBuilding(match[2])}`;
   }
-  if ((match = /^Research of (.+) has completed!?$/.exec(text))) {
+  if ((match = /^Research of (.+) has completed!?$/.exec(normalized))) {
     return "完成一项新学问";
   }
-  if ((match = /^(.+) has been built in (.+)$/.exec(text))) {
+  if ((match = /^(.+) has been built in (.+)$/.exec(normalized))) {
     return "某地传来市政工程落成消息";
   }
-  if (/can be promoted!?$/.test(text)) return "军中传来晋升消息";
-  if (/\b\d+\b enemy units were spotted/.test(text)) return "边境传来多支敌军活动报告";
-  if (/was spotted/.test(text)) return "边境传来敌军活动报告";
-  if (/has attacked/.test(text)) return "前线发生交火";
-  if (/can bombard/.test(text)) return "城防部门声称火力已经就绪";
-  if (/encampment/.test(text)) return "有蛮族据点被清剿";
-  if (/has grown!?$/.test(text)) return "城市人口增长";
-  if (/expanded its borders!?$/.test(text)) return "城市边界扩张";
-  return text
+  if (/can be promoted!?$/.test(normalized)) return "军中传来晋升消息";
+  if (/\b\d+\b enemy units were spotted/.test(normalized)) return "边境传来多支敌军活动报告";
+  if (/was spotted/.test(normalized)) return "边境传来敌军活动报告";
+  if (/has attacked/.test(normalized)) return "前线发生交火";
+  if (/can bombard/.test(normalized)) return "城防部门声称火力已经就绪";
+  if (/encampment/.test(normalized)) return "有蛮族据点被清剿";
+  if (/has grown!?$/.test(normalized)) return "城市人口增长";
+  if (/expanded its borders!?$/.test(normalized)) return "城市边界扩张";
+  return normalized
     .replace(/\(-?\d+ HP\)/g, "")
     .replace(/\b\d+\b enemy units/g, "多支敌军")
     .replace(/\b\d+\b gold/g, "若干黄金")
@@ -1078,7 +1283,8 @@ function publicEventRecords(game) {
       if ((game.turns ?? 0) - (log.turn ?? 0) > 8) continue;
       for (const notification of log.notifications || []) {
         const text = unwrap(notification.text);
-        const isWorld = /has been built in a faraway land|has entered the .* era|has enhanced .*|World Congress/i.test(text);
+        const isDestruction = Boolean(civilizationDestructionMatch(text) || cityStateDestructionMatch(text));
+        const isWorld = /has been built in a faraway land|has entered the .* era|has enhanced .*|World Congress/i.test(text) || isDestruction;
         const isVagueWar = notification.category === "War" && /spotted|attacked|bombard|encampment/.test(text);
         const isCulture = /has been built in|Research of/.test(text);
         if (!isWorld && !isVagueWar && !isCulture) continue;
@@ -1456,6 +1662,7 @@ function buildSourceClaims(
   politicalOverview = null,
   culturalSignals = {},
   frontPageCandidates = [],
+  fallenRecords = [],
 ) {
   const claims = [];
   let index = 1;
@@ -1509,6 +1716,32 @@ function buildSourceClaims(
       `${candidate.topic}：${candidate.summary}`,
       candidate.reason || "程序整理出的当期候选头版素材，由 LLM 判断是否采用",
       candidate.sourceIds || [],
+    );
+  }
+  for (const fallen of fallenRecords) {
+    add(
+      "亡国确认",
+      fallen.obituaryTrigger
+        ? `${fallen.civ}已被 Unciv 败亡规则确认灭亡，适合在本期触发讣告与悼文。`
+        : `${fallen.civ}已被 Unciv 败亡规则确认灭亡，可作为史馆背景，不应每期重复悼文。`,
+      [
+        fallen.defeatBasis?.ruleText,
+        fallen.defeatBasis?.metricText,
+        fallen.destroyedNotifications?.length
+          ? `notificationsLog 中有毁灭通告：${fallen.destroyedNotifications
+              .map((record) => `${record.year || `T${record.turn}`} ${record.text}`)
+              .join("；")}`
+          : "通知日志未提供毁灭通告，判定以 Civilization.isDefeated() 规则为准",
+        fallen.finalCities?.length
+          ? `最后城市线索：${fallen.finalCities.map((city) => `${city.to}接收${city.city}`).join("；")}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("；"),
+      [
+        fallen.id,
+        ...(fallen.finalCities || []).map((city) => `CAP-${city.city}`),
+      ],
     );
   }
   for (const friend of politicalOverview?.formalFriendships || []) {
@@ -1785,7 +2018,15 @@ async function attachPreviousIssueContext(brief, args) {
   return brief;
 }
 
-function buildExpertPanels(metrics, wars, trades, conflictTheaters = [], politicalOverview = null, culturalSignals = {}) {
+function buildExpertPanels(
+  metrics,
+  wars,
+  trades,
+  conflictTheaters = [],
+  politicalOverview = null,
+  culturalSignals = {},
+  fallenRecords = [],
+) {
   const scoreLeader = rank(metrics, "score").at(0);
   const forceLeader = rank(metrics, "force").at(0);
   const weakest = rank(metrics, "score").at(-1);
@@ -1803,6 +2044,12 @@ function buildExpertPanels(metrics, wars, trades, conflictTheaters = [], politic
       weakest ? `${weakest.displayName}的国势偏弱，适合悼文、病危通知或“史馆预案”。` : "",
       politicalOverview?.declaredWars?.length
         ? `政治概览确认的宣战关系：${politicalOverview.declaredWars.map((war) => war.text).join("；")}。`
+        : "",
+      fallenRecords.some((record) => record.obituaryTrigger)
+        ? `官方败亡规则确认：${fallenRecords
+            .filter((record) => record.obituaryTrigger)
+            .map((record) => `${record.civ}已经灭亡`)
+            .join("；")}。这类素材可以触发讣告或悼文。`
         : "",
       politicalOverview?.formalFriendships?.length
         ? `正式友好关系：${politicalOverview.formalFriendships.map((item) => item.text).join("；")}。注意友好不等于没有战争风险。`
@@ -1866,6 +2113,7 @@ function headlineCandidate(id, type, topic, summary, score, sourceIds = [], publ
 function buildFrontPageCandidates({
   conflictTheaters = [],
   captures = [],
+  fallenRecords = [],
   events = [],
   trendSignals = [],
   broadcastSignals = {},
@@ -1878,6 +2126,22 @@ function buildFrontPageCandidates({
     if (candidates.some((item) => item.topic === candidate.topic)) return;
     candidates.push(candidate);
   };
+
+  for (const fallen of fallenRecords) {
+    if (!fallen.obituaryTrigger) continue;
+    add(
+      headlineCandidate(
+        `HEADLINE-${fallen.id}`,
+        "civilization_fallen",
+        `${fallen.civ}灭亡`,
+        `${fallen.civ}已经由官方败亡规则确认灭亡，${fallen.destroyedNotifications?.length ? "通知日志也出现毁灭通告" : "存档指标满足败亡条件"}。`,
+        fallen.status === "近期亡国确认" ? 145 : 115,
+        [fallen.id],
+        fallen.publicSignals,
+        "亡国级事件；由 Unciv 败亡规则确认，可强触发讣告与悼文。",
+      ),
+    );
+  }
 
   const activeTheaters = conflictTheaters
     .filter((theater) => theater.declaredWar)
@@ -2049,6 +2313,15 @@ async function buildBrief(game) {
       capture.year = (await gameYear({ ...game, turns: capture.turn })).label;
     }
   }
+  const fallenRecords = fallenCivilizationRecords(game, captures);
+  for (const record of fallenRecords) {
+    if (record.latestTurn != null) {
+      record.year = (await gameYear({ ...game, turns: record.latestTurn })).label;
+    }
+    for (const notification of record.destroyedNotifications || []) {
+      if (notification.turn != null) notification.year = (await gameYear({ ...game, turns: notification.turn })).label;
+    }
+  }
   const conflictTheaters = buildConflictTheaters(game, metrics, captures, politicalOverview.declaredWars);
   const events = publicEvents(game);
   for (const event of events) {
@@ -2072,6 +2345,7 @@ async function buildBrief(game) {
   const frontPageCandidates = buildFrontPageCandidates({
     conflictTheaters,
     captures,
+    fallenRecords,
     events,
     trendSignals,
     broadcastSignals,
@@ -2087,6 +2361,7 @@ async function buildBrief(game) {
   ) {
     preferredColumns.push("讣告与悼文");
   }
+  if (fallenRecords.some((record) => record.obituaryTrigger)) preferredColumns.push("讣告与悼文");
   if (conflictTheaters.length) preferredColumns.push("战地通讯");
   if (
     politicalOverview.declaredWars.length ||
@@ -2193,6 +2468,28 @@ async function buildBrief(game) {
         cityRole: capture.cityRole,
         formerCapital: capture.isOriginalCapital,
       })),
+    fallenCivilizations: fallenRecords.map((record) => ({
+      id: record.id,
+      civ: record.civ,
+      status: record.status,
+      year: record.year,
+      conquerors: record.conquerors,
+      finalCities: record.finalCities,
+      capital: record.capital,
+      lostCityCount: record.lostCityCount,
+      obituaryTrigger: record.obituaryTrigger,
+      confirmedDefeated: record.confirmedDefeated,
+      defeatEvidence: {
+        publicRule: "官方败亡规则确认",
+        rule: record.defeatBasis?.ruleText,
+        metric: record.defeatBasis?.metricText,
+        destroyedNotifications: record.destroyedNotifications?.map((notification) => ({
+          year: notification.year,
+          text: notification.text,
+        })),
+      },
+      publicSignals: record.publicSignals,
+    })),
   };
 
   const sourceClaims = buildSourceClaims(
@@ -2204,6 +2501,7 @@ async function buildBrief(game) {
     politicalOverview,
     culturalSignals,
     frontPageCandidates,
+    fallenRecords,
   );
 
   return {
@@ -2227,7 +2525,7 @@ async function buildBrief(game) {
         frontPageColumn: "头版社论",
       },
       requestedStyle:
-        "让 LLM 自行选择，偏假装正经的娱乐报纸。默认写成 1+4 版式：头版社论 + 四个其他版面。具体栏目不要固定化；讣告/悼文是罕见强触发栏目，不要因为有弱国就自动写。",
+        "让 LLM 自行选择，偏假装正经的娱乐报纸。默认写成 1+4 版式：头版社论 + 四个其他版面。具体栏目不要固定化；讣告/悼文是罕见强触发栏目，不要因为有弱国就自动写，但 fallenCivilizations 出现 obituaryTrigger 时应认真考虑。",
       layoutPolicy: [
         "默认每期必须写 5 个版面：1 个头版 + 4 个其他版面。",
         "头版一般使用“头版社论”，由 LLM 在 frontPageCandidates 中自行选择最适合本期的头版题目；不要机械照抄候选顺序。",
@@ -2236,7 +2534,7 @@ async function buildBrief(game) {
         "不要在正文中新增方括号版号、页码式版号或其他显式版面标记，也不要改变现有 Markdown 栏目标题和分隔线风格。",
         "栏目之间尽量主题正交：头版讲大战略，战地讲一个战区，经济讲另一个国家或贸易，文化/市井讲不同素材。",
         "不要所有栏目都围绕同一文明或同一事件。",
-        "讣告与悼文只有在失城、亡国边缘、首都陷落或 sourceClaims 强烈支持时才写。",
+        "讣告与悼文只有在失城、亡国边缘、首都陷落、fallenCivilizations 标记 obituaryTrigger 或 sourceClaims 强烈支持时才写。",
       ],
     },
     editorialAngles,
@@ -2272,7 +2570,7 @@ async function buildBrief(game) {
     sourceClaims,
     mildlySensitiveIntel: {
       allowedUse: "只能作为独家消息的氛围材料，最多写趋势，不写精确数值。",
-      expertPanels: buildExpertPanels(metrics, wars, trades, conflictTheaters, politicalOverview, culturalSignals),
+      expertPanels: buildExpertPanels(metrics, wars, trades, conflictTheaters, politicalOverview, culturalSignals, fallenRecords),
     },
     redactionPolicy: [
       "报纸中的具体事实必须能回溯到 publicEvents、strategicSignals 或 sourceClaims；不能凭空编造具体战果、工程、条约、奇观或文明关系。",
@@ -2281,6 +2579,7 @@ async function buildBrief(game) {
       "禁止精确金币、科研、文化、产能、科技清单、建造队列等可直接辅助决策的信息。",
       "允许用宽泛词：高位、中游、低迷、军势醒目、边境不宁、商路活跃、文化声量较高。",
       "允许写已完成的奇观、宗教旗号和政策取向，但不要写当前建造队列或未公开科技清单。",
+      "亡国必须以 strategicSignals.fallenCivilizations 或 sourceClaims 的官方败亡规则确认为准；夺城台账只能作为城市去向辅证。",
       "独家密电可以略微涉密，但必须文学化、模糊化，不得成为参谋简报。",
     ],
   };
@@ -2383,6 +2682,13 @@ async function buildEvidenceReport(game, brief, args, sourcePack) {
   for (const capture of captureRecords) {
     if (capture.turn != null) capture.year = await eventYearLabel(game, capture.turn);
   }
+  const fallenRecords = fallenCivilizationRecords(game, captureRecords);
+  for (const record of fallenRecords) {
+    if (record.latestTurn != null) record.year = await eventYearLabel(game, record.latestTurn);
+    for (const notification of record.destroyedNotifications || []) {
+      if (notification.turn != null) notification.year = await eventYearLabel(game, notification.turn);
+    }
+  }
   const conflictTheaters = sourcePack.brief.strategicSignals?.conflictTheaters || [];
   const sourceLabel =
     args.source === "remote"
@@ -2411,6 +2717,7 @@ async function buildEvidenceReport(game, brief, args, sourcePack) {
     ["宗教记录数", brief.strategicSignals?.religionLandscape?.length ?? 0, "`brief.strategicSignals.religionLandscape`"],
     ["政策取向数", brief.strategicSignals?.policyPosture?.length ?? 0, "`brief.strategicSignals.policyPosture`"],
     ["夺城记录数", brief.strategicSignals?.capturedCityLedger?.length ?? 0, "`brief.strategicSignals.capturedCityLedger`"],
+    ["亡国确认数", brief.strategicSignals?.fallenCivilizations?.length ?? 0, "`brief.strategicSignals.fallenCivilizations`"],
     ["sourceClaims 数", brief.sourceClaims?.length ?? 0, "`brief.sourceClaims`"],
   ];
 
@@ -2484,6 +2791,23 @@ async function buildEvidenceReport(game, brief, args, sourcePack) {
       capture.cityRole,
       capture.isOriginalCapital ? "city.isOriginalCapital = true，可写旧都/首都陷落叙事" : "非原始首都，只能写旧城/城市易手",
     ]);
+
+  const fallenRows = fallenRecords.map((record) => [
+    record.id,
+    record.year ? `${record.year}（T${record.latestTurn}）` : "年代不明",
+    record.civ,
+    record.status,
+    [record.defeatBasis?.ruleText, record.defeatBasis?.metricText].filter(Boolean).join("；"),
+    record.destroyedNotifications?.length
+      ? record.destroyedNotifications
+          .map((notification) => `${notification.year || `T${notification.turn}`}：${notification.text}（${notification.count}条；见于${notification.observedBy.join("、")}）`)
+          .join("；")
+      : "没有毁灭通告；只按 isDefeated 规则确认",
+    record.finalCities?.length
+      ? record.finalCities.map((city) => `${city.to}接收${city.formerCapital ? "旧都" : "旧城"}${city.city}`).join("；")
+      : "没有可追溯的最后夺城记录",
+    record.publicSignals.join("；"),
+  ]);
 
   const theaterRows = conflictTheaters.map((theater) => [
     theater.id,
@@ -2618,12 +2942,14 @@ ${JSON.stringify(
       (sourcePack.brief.strategicSignals?.conflictTheaters?.length ?? 0) +
       (sourcePack.brief.strategicSignals?.wonderLedger?.length ?? 0) +
       (sourcePack.brief.strategicSignals?.religionLandscape?.length ?? 0) +
-      (sourcePack.brief.strategicSignals?.policyPosture?.length ?? 0),
+      (sourcePack.brief.strategicSignals?.policyPosture?.length ?? 0) +
+      (sourcePack.brief.strategicSignals?.fallenCivilizations?.length ?? 0),
     conflictTheaterCount: sourcePack.brief.strategicSignals?.conflictTheaters?.length ?? 0,
     wonderRecordCount: sourcePack.brief.strategicSignals?.wonderLedger?.length ?? 0,
     religionRecordCount: sourcePack.brief.strategicSignals?.religionLandscape?.length ?? 0,
     policyPostureCount: sourcePack.brief.strategicSignals?.policyPosture?.length ?? 0,
     capturedCityCount: sourcePack.brief.strategicSignals?.capturedCityLedger?.length ?? 0,
+    fallenCivilizationCount: sourcePack.brief.strategicSignals?.fallenCivilizations?.length ?? 0,
   },
   null,
   2,
@@ -2654,7 +2980,15 @@ ${markdownTable(["ID", "类型", "对象", "真实看海信息", "进入 brief/�
 这些记录是战局复盘最重要的显式信息之一，只记录城市归属变化，不展示坐标。
 
 ${markdownTable(["ID", "时间", "城市", "原属", "现属", "城市量级", "都城状态", "依据"], captureRows)}
-## 七、战区态势核对
+## 七、亡国确认核对
+
+亡国只按 Unciv 的 \`Civilization.isDefeated()\` 规则和毁灭通告确认；夺城台账只用于说明最后城池去向，不能单独当作亡国判定。
+
+${markdownTable(
+  ["ID", "确认时间", "文明", "判定", "显式指标", "毁灭通告", "最后城市/旧都线索", "进入 brief 的写法"],
+  fallenRows,
+)}
+## 八、战区态势核对
 
 这里把夺城记录、双方总体军势/产能、前线兵影和地形合并成脱敏战区判断。LLM 只看到比例带和趋势，不看到具体部署。
 
@@ -2662,7 +2996,7 @@ ${markdownTable(
   ["ID", "双方", "状态", "夺城线索", "总体军势", "产能", "前线兵影", "地形", "进入 brief 的写法"],
   theaterRows,
 )}
-## 八、地图趋势核对
+## 九、地图趋势核对
 
 这些记录来自地图上的城市和军事单位位置关系，但只保留趋势带，不展示坐标、路线、单位名和具体城防细节。
 
@@ -2670,7 +3004,7 @@ ${markdownTable(
   ["ID", "文明", "周边压力来源", "外向兵影对象", "他国兵影", "蛮族压力", "外向投射", "进入 brief 的写法"],
   mapRows,
 )}
-## 九、军备、科研、文化与财政趋势
+## 十、军备、科研、文化与财政趋势
 
 这些记录来自最近若干回合的统计变化。LLM 只看到趋势词，不看到具体差值；这里也不列城市坐标和建造队列。
 
@@ -2678,7 +3012,7 @@ ${markdownTable(
   ["ID", "文明", "窗口", "军备", "产能", "科研", "文化", "财政", "进入 brief 的写法"],
   trendRows,
 )}
-## 十、奇观、宗教与政策取向核对
+## 十一、奇观、宗教与政策取向核对
 
 这些记录来自已建建筑、自然奇观、全局宗教表、城市圣城字段和文明政策表。它们适合写文化副刊、政治观察和独家密电，但不包含当前建造队列。
 
@@ -2691,28 +3025,29 @@ ${markdownTable(
   religionRows,
 )}
 ${markdownTable(["ID", "取向", "涉及文明", "完整制度叙事", "进入 brief 的写法"], policyRows)}
-## 十一、近期通知核对
+## 十二、近期通知核对
 
 这些记录来自各文明 \`notificationsLog\` 中最近若干回合、且被程序判定为适合进入报纸素材池的通知。左侧是真实通知文本，右侧是进入 brief 前的降敏写法。
 
 ${markdownTable(["ID", "时间", "来源文明", "类别", "真实通知文本", "进入 brief 的写法"], eventRows)}
-## 十二、sourceClaims 核对
+## 十三、sourceClaims 核对
 
 这些是 LLM 最应该依赖的事实陈述。报纸里的具体事实如果离开这些 sourceClaims，就应该视为模型发挥。
 
 ${markdownTable(["ID", "类别", "可用事实", "依据", "来源 ID"], claimRows)}
-## 十三、专家面板来源
+## 十四、专家面板来源
 
 这些内容会进入 \`mildlySensitiveIntel.expertPanels\`，供“独家密电”栏目使用。它们允许略微涉密，但仍应写成趋势、传闻和隐喻。
 
 ${markdownTable(["ID", "brief 中的专家素材", "主要依据"], panelRows)}
-## 十四、核稿办法
+## 十五、核稿办法
 
 1. 报纸中关于强国、弱国、霸权气氛的判断，优先核对“四、文明指标与报纸标签”。
-2. 报纸中关于战争、夺城、战况、前线态势、地形的内容，优先核对“六、夺城与城市易手台账”和“七、战区态势核对”。
-3. 报纸中关于边境压力、蛮族活动、前线交火的内容，优先核对“八、地图趋势核对”和“十一、近期通知核对”。
-4. 报纸中关于奇观、宗教、政策取向、时代变化、科研、城市发展、市政工程的内容，优先核对“九、军备、科研、文化与财政趋势”“十、奇观、宗教与政策取向核对”和“十一、近期通知核对”。
-5. 报纸中如果出现找不到对应证据的具体事实，那就是 LLM 的文学发挥，发布前应人工改掉或删掉。
+2. 报纸中关于战争、夺城、战况、前线态势、地形的内容，优先核对“六、夺城与城市易手台账”和“八、战区态势核对”。
+3. 报纸中关于亡国、灭亡、讣告或悼文的内容，优先核对“七、亡国确认核对”；城市易手只能作为辅证。
+4. 报纸中关于边境压力、蛮族活动、前线交火的内容，优先核对“九、地图趋势核对”和“十二、近期通知核对”。
+5. 报纸中关于奇观、宗教、政策取向、时代变化、科研、城市发展、市政工程的内容，优先核对“十、军备、科研、文化与财政趋势”“十一、奇观、宗教与政策取向核对”和“十二、近期通知核对”。
+6. 报纸中如果出现找不到对应证据的具体事实，那就是 LLM 的文学发挥，发布前应人工改掉或删掉。
 `;
 }
 
@@ -2749,6 +3084,7 @@ async function buildPrompt(brief, args) {
 - 奇观、宗教和政策素材只做调味，最多挑一两个最有梗的事实，不要写成文化名录。
 - 版面不能固定化，但版式默认固定为 1+4。栏目之间尽量主题正交，不要所有栏目都写同一个国家或同一件事。
 - 讣告与悼文是罕见栏目，只有失城、首都陷落、亡国边缘或 brief 明确强烈支持时才写。
+- 如果 strategicSignals.fallenCivilizations 中存在 obituaryTrigger=true，本期必须至少在一个版面处理这件亡国级事件；可以写成“讣告与悼文”“史馆档案”或头版社论，但不要完全略过。
 - 已宣战战争、城市易手、夺城旧账、战区力量对比的优先级高于财政或普通内政趋势。财政只能作为旁注。
 - 除纪年和报纸期号外，不要写任何看似精确的次数、数量、排名或清单；用“多国”“部分国家”“若干”代替。
 - 必须从固定栏目中组成 1+4 五个版面；不要机械罗列栏目名，每版都要有自己的标题和短小观点。
@@ -2925,8 +3261,10 @@ async function buildTimelineEntries(game, brief) {
     });
   }
 
-  for (const capture of cityCaptureRecords(game).filter((item) => item.isMajorOriginalOwner)) {
+  const captures = cityCaptureRecords(game);
+  for (const capture of captures.filter((item) => item.isMajorOriginalOwner)) {
     const year = capture.turn == null ? "年代不明" : await eventYearLabel(game, capture.turn);
+    capture.year = year;
     entries.push({
       key: `capture|${capture.turn}|${capture.city}|${capture.rawOriginalOwner}|${capture.rawCurrentOwner}`,
       turn: capture.turn,
@@ -2938,6 +3276,21 @@ async function buildTimelineEntries(game, brief) {
       source: "city_owner_and_turnAcquired",
       privacy: "city_level_sanitized",
       formerCapital: capture.isOriginalCapital,
+    });
+  }
+
+  for (const fallen of fallenCivilizationRecords(game, captures)) {
+    const year = fallen.latestTurn == null ? "年代不明" : await eventYearLabel(game, fallen.latestTurn);
+    entries.push({
+      key: `fallen|${fallen.civ}`,
+      turn: fallen.latestTurn,
+      year,
+      category: "文明灭亡",
+      civ: fallen.civ,
+      summary: `${fallen.civ}经官方败亡规则确认灭亡`,
+      importance: "major",
+      source: "unciv_isDefeated_rule",
+      privacy: "sanitized",
     });
   }
 
@@ -2972,7 +3325,7 @@ async function updateTimeline(game, brief, args) {
   const acceptedSchemas = new Set(["kanhai-daily-major-timeline/v2", legacyTimelineSchema]);
   const entries = acceptedSchemas.has(existing.schema) ? existing.entries || [] : [];
   const timelineKey = (entry) => (entry.category === "全球广播" ? `world|${entry.summary}` : entry.key);
-  const keepTimelineEntry = (entry) => ["全球广播", "城市易手"].includes(entry.category);
+  const keepTimelineEntry = (entry) => ["全球广播", "城市易手", "文明灭亡"].includes(entry.category);
   const byKey = new Map();
   for (const entry of entries) {
     if (!keepTimelineEntry(entry)) continue;

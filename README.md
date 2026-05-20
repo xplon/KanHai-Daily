@@ -106,7 +106,7 @@ node .\kanhai-daily\scripts\kanhai-paper.mjs --style 独家消息
 
 版面不会固定套文章内容，但会固定默认数量。脚本会把版面约束写进 brief：默认生成 1 个头版社论和 4 个其他自然栏目，但正文仍沿用当前 Markdown 报纸格式，不新增方括号版号、页码式版号或其他显式版面标记，也不改变现有栏目标题和分隔线风格；栏目之间尽量主题正交，不要所有栏目都围绕同一个国家或同一件事。
 
-头版不再由程序写死。脚本会生成 `brief.newspaper.frontPageCandidates` 候选池，包含当前战争、近期城市易手、世界广播、科研/文化/军备趋势等热点；LLM 根据新闻性和报纸效果自行选择头版。若存在上一期 `paper.md`，脚本还会把 `brief.newspaper.previousIssue` 交给 LLM，用来避免连续两期重复同一个头版角度。`讣告与悼文` 是罕见强触发栏目，只有失城、首都陷落、亡国边缘或局势强烈支持时才建议使用。
+头版不再由程序写死。脚本会生成 `brief.newspaper.frontPageCandidates` 候选池，包含当前战争、近期城市易手、文明灭亡、世界广播、科研/文化/军备趋势等热点；LLM 根据新闻性和报纸效果自行选择头版。若存在上一期 `paper.md`，脚本还会把 `brief.newspaper.previousIssue` 交给 LLM，用来避免连续两期重复同一个头版角度。`讣告与悼文` 是罕见强触发栏目，只有失城、首都陷落、亡国边缘、官方败亡规则确认灭亡或局势强烈支持时才建议使用。
 
 ## 泄密边界
 
@@ -137,6 +137,7 @@ node .\kanhai-daily\scripts\kanhai-paper.mjs --style 独家消息
 - 未确认外交关系会单独放入 `politicalOverview.uncertainRelations`。这类关系可能有战争记忆或负面外交修正，但不能写成正式交战。
 - 公开战争、贸易传闻和近期通知的真实文本。
 - 夺城与城市易手台账，例如城市原属、现属、发生时间、城市量级，以及是否有原始首都/旧都信源。
+- 亡国确认表：必须满足 Unciv `Civilization.isDefeated()` 规则才会作为确认亡国素材；毁灭通告作为补强证据，夺城台账只作为最后城市去向的辅证。
 - 战区态势核对，例如交战/对峙双方、总体军势比例带、产能比例带、前线兵影比例带和地形趋势。
 - 每条真实通知进入 brief 前的降敏写法。
 - 脱敏地图趋势，例如某文明周边是否出现他国兵影、蛮族压力或外向兵影。
@@ -153,7 +154,7 @@ node .\kanhai-daily\scripts\kanhai-paper.mjs --evidence-out .\kanhai-daily\repor
 
 ## 累计时间线
 
-`reports/timeline.json` 是长期大事记，脚本每次运行会追加新事件并按 key 去重。它只保留足以改变局势或值得复盘的大事件，例如城市易手、时代变化、奇观建成、宗教强化等。
+`reports/timeline.json` 是长期大事记，脚本每次运行会追加新事件并按 key 去重。它只保留足以改变局势或值得复盘的大事件，例如城市易手、文明灭亡、时代变化、奇观建成、宗教强化等。
 
 `reports/timeline.md` 是从长期库生成的阅读版，适合之后回顾战争、奇观和时代变化。普通边境提示、城市涨人口、零散蛮族消息不会进入这里。
 
@@ -178,3 +179,4 @@ node .\kanhai-daily\scripts\kanhai-daily.mjs --out .\kanhai-daily\reports\latest
 - `Unciv/core/src/com/unciv/ui/screens/savescreens/Gzip.kt`: gzip/base64 实现。
 - `Unciv/server/src/com/unciv/app/server/UncivServer.kt`: `/files/{fileName}` 只读/上传路由。
 - `Unciv/core/src/com/unciv/models/ruleset/Speed.kt`: 回合转纪年逻辑。
+- `Unciv/core/src/com/unciv/logic/civilization/Civilization.kt`: `isDefeated()` 败亡判定和毁灭通告来源。
