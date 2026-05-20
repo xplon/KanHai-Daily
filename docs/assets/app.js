@@ -32,6 +32,15 @@ const blockRenderers = {
   },
 };
 
+const MAX_DISPLAY_SECTIONS = 5;
+const SECTION_PRIORITY = {
+  optional: 10,
+  regular: 50,
+  strong: 90,
+};
+const OPTIONAL_SECTION_RE = /\u5e02\u4e95|\u62db\u8058|\u5360\u661f|\u5929\u8c61|\u86ee\u65cf|\u62a5\u7f1d|\u62fe\u95fb|\u70ed\u7ebf/u;
+const STRONG_SECTION_RE = /\u8ba3\u544a|\u60bc\u6587|\u4ea1\u56fd|\u706d\u4ea1|\u9996\u90fd|\u9677\u843d|\u6218\u5730|\u653f\u6cbb|\u79d1\u5b66|\u5947\u89c2/u;
+
 init().catch((error) => {
   nodes.newspaper.replaceChildren(el("div", { className: "loading error" }, `页面数据加载失败：${error.message}`));
 });
@@ -198,7 +207,28 @@ function issueTextLength(issue) {
 }
 
 function issueSections(issue) {
-  return issue.sections || [];
+  return chooseDisplaySections(issue.sections || []);
+}
+
+function chooseDisplaySections(sections) {
+  if (sections.length <= MAX_DISPLAY_SECTIONS) return sections;
+  const [lead, ...rest] = sections;
+  const dropIndex = rest.reduce((bestIndex, section, index) => {
+    const best = rest[bestIndex];
+    const priority = sectionDisplayPriority(section);
+    const bestPriority = sectionDisplayPriority(best);
+    if (priority < bestPriority) return index;
+    if (priority > bestPriority) return bestIndex;
+    return sectionWeight(section) <= sectionWeight(best) ? index : bestIndex;
+  }, 0);
+  return [lead, ...rest.filter((_, index) => index !== dropIndex)].slice(0, MAX_DISPLAY_SECTIONS);
+}
+
+function sectionDisplayPriority(section) {
+  const label = `${cleanText(section.kicker)} ${cleanText(section.headline)}`;
+  if (STRONG_SECTION_RE.test(label)) return SECTION_PRIORITY.strong;
+  if (OPTIONAL_SECTION_RE.test(label)) return SECTION_PRIORITY.optional;
+  return SECTION_PRIORITY.regular;
 }
 
 function sectionWeight(section) {
