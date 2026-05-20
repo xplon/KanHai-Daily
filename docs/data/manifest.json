@@ -1,17 +1,27 @@
 {
   "schema": "kanhai-pages/v1",
-  "updatedAt": "2026-05-18T15:24:25.644Z",
+  "updatedAt": "2026-05-20T15:38:54.294Z",
   "latest": {
     "gameId": "2ec21879",
-    "issueId": "t115-20260518-231248"
+    "issueId": "t126-20260520-233635"
   },
   "games": [
     {
       "id": "2ec21879",
       "name": "对局 2ec21879",
       "shortId": "2ec21879",
-      "latestIssueId": "t115-20260518-231248",
+      "latestIssueId": "t126-20260520-233635",
       "issues": [
+        {
+          "id": "t126-20260520-233635",
+          "title": "蒙古的葬礼与新秩序的诞生",
+          "paperName": "看海日报",
+          "dateline": "公元1320年·帝国余晖",
+          "year": "公元1320年",
+          "turn": 126,
+          "generatedAt": "2026-05-20T23:36:35+08:00",
+          "generatedAtLabel": "2026-05-20 23:36:35"
+        },
         {
           "id": "t115-20260518-231248",
           "title": "三姓家奴与两线残阳",
