@@ -1969,6 +1969,7 @@ function previousIssueSectionTitles(text) {
 
 async function findPreviousIssueContext(args) {
   const runsDir = path.join(PROJECT_DIR, "reports", "runs");
+  const currentGameId = String(args.currentGameId || args.gameId || "").toLowerCase();
   let dirs = [];
   try {
     dirs = await fs.readdir(runsDir, { withFileTypes: true });
@@ -1982,6 +1983,16 @@ async function findPreviousIssueContext(args) {
     if (!dir.isDirectory()) continue;
     const paperPath = path.join(runsDir, dir.name, "paper.md");
     if (path.resolve(paperPath) === path.resolve(args.out)) continue;
+    if (currentGameId) {
+      const sourcePackPath = path.join(runsDir, dir.name, "source-pack.json");
+      const sourcePack = await readJsonIfPresent(sourcePackPath, null);
+      const sourceLabel = sourcePack?.metadata?.sourceLabel || "";
+      const runGameId =
+        sourcePack?.metadata?.gameId ||
+        /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i.exec(sourceLabel)?.[1] ||
+        "";
+      if (String(runGameId).toLowerCase() !== currentGameId) continue;
+    }
     try {
       const stat = await fs.stat(paperPath);
       if (stat.isFile()) papers.push({ paperPath, run: dir.name, modifiedAt: stat.mtimeMs });
@@ -3172,6 +3183,10 @@ async function factCheckPaper(sourcePack, paper, args) {
 
 function extractResponseText(response) {
   if (!response || typeof response !== "object") return "";
+  if (response.base_resp) {
+    const nested = extractResponseText(response.base_resp);
+    if (nested) return nested;
+  }
   if (typeof response.output_text === "string") return response.output_text;
   if (typeof response.completion === "string") return response.completion;
   if (typeof response.text === "string") return response.text;
@@ -3356,6 +3371,7 @@ async function main() {
   const game = await loadGame(args);
   const brief = await buildBrief(game);
   resolveOutputPaths(args, game, brief);
+  args.currentGameId = game.gameId || args.gameId || "";
   await attachPreviousIssueContext(brief, args);
   const sourcePack = buildSourcePack(game, brief, args);
   const prompt = await buildPrompt(brief, args);
