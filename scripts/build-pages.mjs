@@ -361,12 +361,15 @@ function makeIssueSummary(brief) {
     scoreBand: profile.scoreBand || "",
     forceBand: profile.forceBand || "",
   }));
-  const events = (brief?.publicEvents || []).slice(0, 8).map((event) => ({
-    year: event.year,
-    civ: event.civ,
-    kind: event.kind,
-    text: event.text,
-  }));
+  const events = (brief?.publicEvents || [])
+    .filter((event) => !/坐标|路线|城防|火力已经就绪|建造队列|精确/.test(event.text || ""))
+    .slice(0, 8)
+    .map((event) => ({
+      year: event.year,
+      civ: event.civ,
+      kind: event.kind,
+      text: event.text,
+    }));
   const preferredColumns = brief?.newspaper?.preferredColumns || [];
 
   return {
